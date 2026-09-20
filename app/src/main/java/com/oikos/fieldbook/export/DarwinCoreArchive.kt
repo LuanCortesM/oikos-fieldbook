@@ -95,7 +95,7 @@ object DarwinCoreArchive {
      * como declarado no meta.xml. Tabulacao e quebra de linha dentro do valor
      * viram espaco, que e a forma segura para este delimitador.
      */
-    internal fun tsv(headers: List<String>, rows: List<Map<String, String>>): String = buildString {
+    fun tsv(headers: List<String>, rows: List<Map<String, String>>): String = buildString {
         append(headers.joinToString(SEP))
         append(EOL)
         rows.forEach { row ->
@@ -104,7 +104,7 @@ object DarwinCoreArchive {
         }
     }
 
-    internal fun clean(value: String): String = value
+    fun clean(value: String): String = value
         .replace(SEP, " ")
         .replace("\r\n", " ")
         .replace("\n", " ")
@@ -114,7 +114,7 @@ object DarwinCoreArchive {
     private const val SEP = "\t"
     private const val EOL = "\n"
 
-    internal fun metaXml(
+    fun metaXml(
         occurrenceHeaders: List<String>,
         measurementHeaders: List<String>,
         multimediaHeaders: List<String>
@@ -154,7 +154,7 @@ object DarwinCoreArchive {
         append("  </").append(tag).append(">\n")
     }
 
-    internal fun emlXml(m: ArchiveMetadata): String = buildString {
+    fun emlXml(m: ArchiveMetadata): String = buildString {
         append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
         append("<eml:eml xmlns:eml=\"eml://ecoinformatics.org/eml-2.1.1\"")
         append(" xmlns:dc=\"http://purl.org/dc/terms/\"")
