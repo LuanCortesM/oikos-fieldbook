@@ -28,6 +28,13 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+
+    // Schemas do Room ficam versionados em app/schemas/ e sao lidos como
+    // assets nos testes de migracao.
+    sourceSets {
+        getByName("androidTest").assets.srcDir("$projectDir/schemas")
+    }
+
     signingConfigs {
         if (releaseKeystorePropertiesFile.exists()) {
             create("release") {
@@ -65,6 +72,11 @@ android {
     buildFeatures {
         compose = true
     }
+}
+
+// KSP: destino dos schemas exportados pelo Room (exportSchema = true).
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {

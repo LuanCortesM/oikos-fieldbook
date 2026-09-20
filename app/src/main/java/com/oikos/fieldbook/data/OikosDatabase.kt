@@ -17,8 +17,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         GpsTrackEntity::class,
         GpsTrackPointEntity::class
     ],
-    version = 3,
-    exportSchema = false
+    version = 4,
+    exportSchema = true
 )
 abstract class OikosDatabase : RoomDatabase() {
     abstract fun projectDao(): ProjectDao
@@ -33,6 +33,7 @@ abstract class OikosDatabase : RoomDatabase() {
             Room.databaseBuilder(context, OikosDatabase::class.java, "oikos_fieldbook.db")
                 .addMigrations(MIGRATION_1_2)
                 .addMigrations(MIGRATION_2_3)
+                .addMigrations(MIGRATION_3_4)
                 .build()
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -116,6 +117,15 @@ abstract class OikosDatabase : RoomDatabase() {
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_gps_track_points_trackId` ON `gps_track_points` (`trackId`)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_gps_track_points_timestamp` ON `gps_track_points` (`timestamp`)")
+            }
+        }
+
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                addColumnIfMissing(db, "sessions", "parentEventId", "TEXT NOT NULL DEFAULT ''")
+                addColumnIfMissing(db, "sessions", "sampleSizeValue", "REAL")
+                addColumnIfMissing(db, "sessions", "sampleSizeUnit", "TEXT NOT NULL DEFAULT ''")
+                addColumnIfMissing(db, "sessions", "verbatimEventDate", "TEXT NOT NULL DEFAULT ''")
             }
         }
 

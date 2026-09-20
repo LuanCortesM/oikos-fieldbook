@@ -80,6 +80,14 @@ data class SessionEntity(
     val environmentType: String = "",
     val samplingProtocol: String = "",
     val samplingEffort: String = "",
+    /** dwc:parentEventID - hierarquia campanha > dia > transecto > parcela. */
+    val parentEventId: String = "",
+    /** dwc:sampleSizeValue - dimensao da unidade amostral. */
+    val sampleSizeValue: Double? = null,
+    /** dwc:sampleSizeUnit - unidade de sampleSizeValue. */
+    val sampleSizeUnit: String = "",
+    /** dwc:verbatimEventDate - data como anotada em campo. */
+    val verbatimEventDate: String = "",
     val recordedBy: String = "",
     val fieldTeam: String = "",
     val gpsTrackEnabled: Boolean = false,
