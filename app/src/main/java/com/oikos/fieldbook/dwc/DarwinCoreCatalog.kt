@@ -8,8 +8,72 @@ data class DarwinCoreField(
     val type: String = "text",
     val enabled: Boolean = true,
     val required: Boolean = false,
-    val order: Int
+    val order: Int,
+    /** Vocabulario controlado. Vazio = texto livre. */
+    val vocabulary: List<String> = emptyList(),
+    /** Unidade declarada para exportacao como MeasurementOrFact. */
+    val unit: String = ""
 )
+
+/**
+ * Vocabularios controlados do Darwin Core.
+ * Os valores sao gravados exatamente como o padrao os define (em ingles),
+ * porque e isso que o GBIF e o SiBBr consomem; a traducao fica na interface.
+ */
+object DwcVocabulary {
+    val basisOfRecord = listOf(
+        "HumanObservation",
+        "MachineObservation",
+        "PreservedSpecimen",
+        "MaterialSample",
+        "LivingSpecimen",
+        "FossilSpecimen",
+        "MaterialCitation"
+    )
+    val occurrenceStatus = listOf("present", "absent")
+    val sex = listOf("male", "female", "hermaphrodite", "undetermined")
+    val lifeStage = listOf(
+        "egg", "larva", "tadpole", "juvenile", "subadult", "adult",
+        "seedling", "sapling", "seed", "unknown"
+    )
+    val taxonRank = listOf(
+        "kingdom", "phylum", "class", "order", "family", "genus",
+        "species", "subspecies", "variety", "form"
+    )
+    val typeStatus = listOf(
+        "holotype", "paratype", "isotype", "lectotype", "neotype",
+        "syntype", "topotype", "notAType"
+    )
+    val establishmentMeans = listOf(
+        "native", "nativeReintroduced", "introduced",
+        "introducedAssistedColonisation", "vagrant", "uncertain"
+    )
+    val degreeOfEstablishment = listOf(
+        "native", "captive", "cultivated", "released", "failing",
+        "casual", "reproducing", "established", "colonising",
+        "invasive", "widespreadInvasive"
+    )
+    val pathway = listOf(
+        "corridor", "escapeFromConfinement", "releaseInNature",
+        "transportContaminant", "transportStowaway", "unaided", "unknown"
+    )
+    val vitality = listOf("alive", "dead", "mixed", "uncertain")
+    val identificationQualifier = listOf("cf.", "aff.", "sp.", "s.l.", "s.str.", "?")
+    val identificationVerificationStatus = listOf(
+        "unverified", "verifiedBySpecialist", "requiresVerification", "verified"
+    )
+    val preparations = listOf(
+        "exsicata", "alcohol", "driedWhole", "pinned", "tissueInSilica",
+        "tissueInEthanol", "skeleton", "skin", "slide", "photographOnly"
+    )
+    val disposition = listOf(
+        "inCollection", "inProcessing", "onLoan", "missing", "destroyed", "notCollected"
+    )
+    val sampleSizeUnit = listOf(
+        "metre", "squareMetre", "hectare", "kilometre", "hour", "minute",
+        "day", "trapNight", "individual"
+    )
+}
 
 object DarwinCoreCatalog {
     val recommended: List<DarwinCoreField> = listOf(
@@ -39,14 +103,14 @@ object DarwinCoreCatalog {
         DarwinCoreField("habitat", "Habitat", "Habitat", "Amostragem", order = 32),
         DarwinCoreField("fieldNumber", "Parcela/transecto/ponto", "Plot/transect/point", "Amostragem", enabled = false, order = 33),
         DarwinCoreField("individualCount", "Número de indivíduos", "Number of individuals", "Ocorrência", "integer", true, false, 40),
-        DarwinCoreField("sex", "Sexo", "Sex", "Ocorrência", enabled = false, order = 41),
-        DarwinCoreField("lifeStage", "Fase de vida", "Life stage", "Ocorrência", enabled = false, order = 42),
+        DarwinCoreField("sex", "Sexo", "Sex", "Ocorrência", enabled = false, order = 41, vocabulary = DwcVocabulary.sex),
+        DarwinCoreField("lifeStage", "Fase de vida", "Life stage", "Ocorrência", enabled = false, order = 42, vocabulary = DwcVocabulary.lifeStage),
         DarwinCoreField("behavior", "Comportamento", "Behavior", "Ocorrência", enabled = false, order = 43),
         DarwinCoreField("reproductiveCondition", "Condição reprodutiva", "Reproductive condition", "Ocorrência", enabled = false, order = 44),
-        DarwinCoreField("occurrenceStatus", "Status da ocorrência", "Occurrence status", "Ocorrência", order = 45),
+        DarwinCoreField("occurrenceStatus", "Status da ocorrência", "Occurrence status", "Ocorrência", order = 45, vocabulary = DwcVocabulary.occurrenceStatus),
         DarwinCoreField("identifiedBy", "Quem identificou", "Identified by", "Identificacao", enabled = false, order = 50),
         DarwinCoreField("dateIdentified", "Data da identificacao", "Identification date", "Identificacao", "date", false, false, 51),
-        DarwinCoreField("identificationQualifier", "Qualificador da identificação", "Identification qualifier", "Identificação", enabled = false, order = 52),
+        DarwinCoreField("identificationQualifier", "Qualificador da identificação", "Identification qualifier", "Identificação", enabled = false, order = 52, vocabulary = DwcVocabulary.identificationQualifier),
         DarwinCoreField("identificationRemarks", "Observações da identificação", "Identification notes", "Identificação", "long_text", false, false, 53),
         DarwinCoreField("associatedMedia", "Foto/áudio", "Photo/audio", "Mídia", enabled = false, order = 60),
         DarwinCoreField("associatedReferences", "Link externo", "External link", "Mídia", enabled = false, order = 61),
@@ -129,7 +193,80 @@ object DarwinCoreCatalog {
         DarwinCoreField("collectionNotes", "Observações para herbário/coleção", "Collection notes", "Anotacoes", "long_text", enabled = false, order = 227)
     )
 
-    val allFields: List<DarwinCoreField> = recommended + advancedOccurrenceFields
+
+    /** Coleção e tombo — habilita uso em herbário e coleção zoológica. */
+    val collectionFields: List<DarwinCoreField> = listOf(
+        DarwinCoreField("catalogNumber", "Número de tombo", "Catalog number", "Coleção", enabled = false, order = 240),
+        DarwinCoreField("otherCatalogNumbers", "Outros números de tombo", "Other catalog numbers", "Coleção", enabled = false, order = 241),
+        DarwinCoreField("institutionCode", "Sigla da instituição", "Institution code", "Coleção", enabled = false, order = 242),
+        DarwinCoreField("collectionCode", "Sigla da coleção", "Collection code", "Coleção", enabled = false, order = 243),
+        DarwinCoreField("preparations", "Tipo de preparação", "Preparations", "Coleção", enabled = false, order = 244, vocabulary = DwcVocabulary.preparations),
+        DarwinCoreField("disposition", "Destino do material", "Disposition", "Coleção", enabled = false, order = 245, vocabulary = DwcVocabulary.disposition),
+        DarwinCoreField("typeStatus", "Status de tipo nomenclatural", "Type status", "Coleção", enabled = false, order = 246, vocabulary = DwcVocabulary.typeStatus),
+        DarwinCoreField("associatedSequences", "Sequências associadas", "Associated sequences", "Coleção", enabled = false, order = 247),
+        DarwinCoreField("organismID", "Identificador do indivíduo", "Organism ID", "Coleção", enabled = false, order = 248)
+    )
+
+    /** Taxonomia e identificação — resolução nomenclatural completa. */
+    val taxonomyFields: List<DarwinCoreField> = listOf(
+        DarwinCoreField("scientificNameAuthorship", "Autoria do nome científico", "Scientific name authorship", "Taxonomia", enabled = false, order = 27),
+        DarwinCoreField("infraspecificEpithet", "Epíteto infraespecífico", "Infraspecific epithet", "Taxonomia", enabled = false, order = 28),
+        DarwinCoreField("taxonRank", "Nível taxonômico", "Taxon rank", "Taxonomia", enabled = false, order = 29, vocabulary = DwcVocabulary.taxonRank),
+        DarwinCoreField("higherClassification", "Classificação superior", "Higher classification", "Taxonomia", enabled = false, order = 30),
+        DarwinCoreField("taxonRemarks", "Observações taxonômicas", "Taxon remarks", "Taxonomia", "long_text", enabled = false, order = 31),
+        DarwinCoreField("verbatimIdentification", "Identificação como anotada", "Verbatim identification", "Identificação", enabled = false, order = 54),
+        DarwinCoreField("identificationVerificationStatus", "Status de verificação", "Identification verification status", "Identificação", enabled = false, order = 55, vocabulary = DwcVocabulary.identificationVerificationStatus)
+    )
+
+    /** Ecologia e conservação. */
+    val ecologyFields: List<DarwinCoreField> = listOf(
+        DarwinCoreField("associatedTaxa", "Táxons associados", "Associated taxa", "Ecologia", enabled = false, order = 260, vocabulary = emptyList()),
+        DarwinCoreField("establishmentMeans", "Origem", "Establishment means", "Ecologia", enabled = false, order = 261, vocabulary = DwcVocabulary.establishmentMeans),
+        DarwinCoreField("degreeOfEstablishment", "Grau de estabelecimento", "Degree of establishment", "Ecologia", enabled = false, order = 262, vocabulary = DwcVocabulary.degreeOfEstablishment),
+        DarwinCoreField("pathway", "Via de introdução", "Pathway", "Ecologia", enabled = false, order = 263, vocabulary = DwcVocabulary.pathway),
+        DarwinCoreField("vitality", "Condição vital", "Vitality", "Ecologia", enabled = false, order = 264, vocabulary = DwcVocabulary.vitality),
+        DarwinCoreField("associatedOccurrences", "Ocorrências associadas", "Associated occurrences", "Ecologia", enabled = false, order = 265)
+    )
+
+    /** Georreferenciamento rastreável. */
+    val georeferenceFields: List<DarwinCoreField> = listOf(
+        DarwinCoreField("verbatimCoordinates", "Coordenada como lida", "Verbatim coordinates", "Georreferenciamento", enabled = false, order = 280),
+        DarwinCoreField("verbatimSRS", "Sistema de referência original", "Verbatim SRS", "Georreferenciamento", enabled = false, order = 281),
+        DarwinCoreField("coordinatePrecision", "Precisão da coordenada", "Coordinate precision", "Georreferenciamento", "decimal", enabled = false, order = 282),
+        DarwinCoreField("maximumElevationInMeters", "Altitude máxima", "Maximum elevation", "Georreferenciamento", "decimal", enabled = false, order = 283, unit = "m"),
+        DarwinCoreField("georeferenceProtocol", "Protocolo de georreferenciamento", "Georeference protocol", "Georreferenciamento", enabled = false, order = 284),
+        DarwinCoreField("georeferenceSources", "Fontes do georreferenciamento", "Georeference sources", "Georreferenciamento", enabled = false, order = 285),
+        DarwinCoreField("georeferencedBy", "Quem georreferenciou", "Georeferenced by", "Georreferenciamento", enabled = false, order = 286),
+        DarwinCoreField("georeferenceRemarks", "Observações do georreferenciamento", "Georeference remarks", "Georreferenciamento", "long_text", enabled = false, order = 287),
+        DarwinCoreField("countryCode", "Código do país", "Country code", "Georreferenciamento", enabled = false, order = 288),
+        DarwinCoreField("locationRemarks", "Observações da localidade", "Location remarks", "Georreferenciamento", "long_text", enabled = false, order = 289),
+        DarwinCoreField("waterBody", "Corpo d'água", "Water body", "Georreferenciamento", enabled = false, order = 290),
+        DarwinCoreField("island", "Ilha", "Island", "Georreferenciamento", enabled = false, order = 291)
+    )
+
+    /** Autoria e crédito. */
+    val attributionFields: List<DarwinCoreField> = listOf(
+        DarwinCoreField("recordedByID", "ORCID de quem coletou", "Recorded by ID", "Autoria", enabled = false, order = 300),
+        DarwinCoreField("identifiedByID", "ORCID de quem identificou", "Identified by ID", "Autoria", enabled = false, order = 301),
+        DarwinCoreField("datasetName", "Nome do conjunto de dados", "Dataset name", "Autoria", enabled = false, order = 302),
+        DarwinCoreField("rightsHolder", "Detentor dos direitos", "Rights holder", "Autoria", enabled = false, order = 303),
+        DarwinCoreField("bibliographicCitation", "Citação bibliográfica", "Bibliographic citation", "Autoria", enabled = false, order = 304)
+    )
+
+    /** Medidas — complementos do MeasurementOrFact. */
+    val measurementFields: List<DarwinCoreField> = listOf(
+        DarwinCoreField("measurementMethod", "Método da medida", "Measurement method", "MeasurementOrFact", enabled = false, order = 83),
+        DarwinCoreField("measurementDeterminedBy", "Quem mediu", "Measurement determined by", "MeasurementOrFact", enabled = false, order = 84),
+        DarwinCoreField("measurementDeterminedDate", "Data da medida", "Measurement date", "MeasurementOrFact", "date", enabled = false, order = 85),
+        DarwinCoreField("measurementAccuracy", "Acurácia da medida", "Measurement accuracy", "MeasurementOrFact", "decimal", enabled = false, order = 86)
+    )
+
+    val allFields: List<DarwinCoreField> =
+        recommended + advancedOccurrenceFields + collectionFields + taxonomyFields +
+            ecologyFields + georeferenceFields + attributionFields + measurementFields
+
+    /** Indice termo -> definicao, para consulta rapida no formulario e no exportador. */
+    val byTerm: Map<String, DarwinCoreField> = allFields.associateBy { it.term }
 
     val coreOccurrenceTerms = listOf(
         "occurrenceID",
