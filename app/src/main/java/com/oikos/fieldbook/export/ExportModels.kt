@@ -19,7 +19,10 @@ enum class ExportFormat(val extension: String, val mimeType: String) {
     Xlsx("xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
     Json("json", "application/json"),
     GeoJson("geojson", "application/geo+json"),
-    Zip("zip", "application/zip")
+    Zip("zip", "application/zip"),
+
+    /** Darwin Core Archive: formato ingerido por IPT, GBIF e SiBBr. */
+    DwcArchive("zip", "application/zip")
 }
 
 data class ExportResult(

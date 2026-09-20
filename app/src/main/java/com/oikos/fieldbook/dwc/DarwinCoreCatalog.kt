@@ -268,6 +268,14 @@ object DarwinCoreCatalog {
         recommended + advancedOccurrenceFields + collectionFields + taxonomyFields +
             ecologyFields + georeferenceFields + attributionFields + measurementFields
 
+    /**
+     * Termos proprios do Oikos, sem equivalente no Darwin Core (morfologia,
+     * bioacustica, vestigios, micologia). No Darwin Core Archive eles nao podem
+     * virar coluna do core, porque nao existe URI da TDWG para eles: saem como
+     * linhas da extensao MeasurementOrFact.
+     */
+    val customTerms: Set<String> = advancedOccurrenceFields.map { it.term }.toSet()
+
     /** Indice termo -> definicao, para consulta rapida no formulario e no exportador. */
     val byTerm: Map<String, DarwinCoreField> = allFields.associateBy { it.term }
 

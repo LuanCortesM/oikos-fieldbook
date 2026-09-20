@@ -2100,7 +2100,24 @@ private fun ExportScreen(viewModel: AppViewModel, projectId: Long, sessionId: Lo
                     FilterChip(
                         selected = selectedFormat == format,
                         onClick = { selectedFormat = format },
-                        label = { Text(if (format == ExportFormat.Zip) ui("ZIP completo recomendado") else format.name.uppercase()) }
+                        label = {
+                            Text(
+                                when (format) {
+                                    ExportFormat.Zip -> ui("ZIP completo recomendado")
+                                    ExportFormat.DwcArchive -> ui("Darwin Core Archive (GBIF/SiBBr)")
+                                    else -> format.name.uppercase()
+                                }
+                            )
+                        }
+                    )
+                }
+                if (selectedFormat == ExportFormat.DwcArchive) {
+                    HelpCard(
+                        "Darwin Core Archive",
+                        "Pacote com meta.xml e eml.xml, no formato que o IPT, o GBIF e o SiBBr " +
+                            "importam sem retrabalho. Campos próprios do Oikos saem como " +
+                            "MeasurementOrFact e as mídias como Simple Multimedia. Revise a licença " +
+                            "no eml.xml antes de publicar."
                     )
                 }
             }

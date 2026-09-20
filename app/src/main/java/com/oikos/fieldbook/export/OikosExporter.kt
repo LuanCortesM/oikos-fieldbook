@@ -50,8 +50,13 @@ class OikosExporter {
             }
             ExportFormat.GeoJson -> packageModel.geoJson().toByteArray(StandardCharsets.UTF_8)
             ExportFormat.Zip -> packageModel.zipBytes()
+            ExportFormat.DwcArchive -> packageModel.dwcArchiveBytes()
         }
-        val stem = if (format == ExportFormat.Zip) "${fileStem}_${LocalDate.now()}" else fileStem
+        val stem = when (format) {
+            ExportFormat.Zip -> "${fileStem}_${LocalDate.now()}"
+            ExportFormat.DwcArchive -> "${fileStem}_dwca_${LocalDate.now()}"
+            else -> fileStem
+        }
         return ExportResult("$stem.${format.extension}", format.mimeType, bytes, warnings.takeIf { it.isNotBlank() })
     }
 
@@ -242,12 +247,105 @@ private class ExportPackage(
                 zip.put("$root/02_tabelas_de_apoio/measurement_or_fact.csv", measurementsCsv())
             }
             zip.put("$root/02_tabelas_de_apoio/midias.csv", mediaCsv())
+            if (content != ExportContent.MediaOnly) {
+                // Pacote pronto para IPT/GBIF/SiBBr, dentro do ZIP completo.
+                zip.put("$root/04_darwin_core_archive/dwca.zip", dwcArchiveBytes())
+            }
             mediaLinks.forEach { link ->
                 val source = File(link.sourcePath)
                 if (source.exists()) zip.putBytes("$root/${link.relativePath}", source.readBytes())
             }
         }
         return output.toByteArray()
+    }
+
+    /**
+     * Darwin Core Archive pronto para IPT, GBIF e SiBBr.
+     *
+     * O core leva apenas termos com URI na TDWG. Campos proprios do Oikos e
+     * medidas vao para a extensao MeasurementOrFact, e as midias para a Simple
+     * Multimedia do GBIF. As colunas auxiliares de UTM ficam de fora do archive
+     * (permanecem nas planilhas), porque nao sao termos do padrao.
+     */
+    fun dwcArchiveBytes(): ByteArray {
+        val auxiliares = setOf("utmZone", "utmHemisphere", "utmEasting", "utmNorthing")
+        val cabecalhoCore = occurrenceHeaders()
+            .filterNot { it in DarwinCoreCatalog.customTerms }
+            .filterNot { it in auxiliares }
+        val linhasCore = occurrences.map { occurrence ->
+            occurrenceMap(sessionById[occurrence.sessionId], occurrence, linksByOccurrence[occurrence.id].orEmpty())
+        }
+
+        // Tudo que ficou de fora do core e tem valor vira MeasurementOrFact.
+        val linhasMof = occurrences.flatMap { occurrence ->
+            parseFlatJsonMap(occurrence.dynamicFieldsJson)
+                .filter { (termo, valor) -> valor.isNotBlank() && termo !in cabecalhoCore }
+                .map { (termo, valor) ->
+                    mapOf(
+                        "occurrenceID" to occurrence.occurrenceId,
+                        "measurementType" to (DarwinCoreCatalog.byTerm[termo]?.labelEn ?: termo),
+                        "measurementValue" to valor,
+                        "measurementUnit" to unitForMeasurement(termo),
+                        "measurementRemarks" to "Oikos FieldBook: $termo"
+                    )
+                }
+        }
+
+        val linhasMidia = mediaLinks
+            .filter { it.occurrenceID.isNotBlank() }
+            .map { link ->
+                mapOf(
+                    "occurrenceID" to link.occurrenceID,
+                    "type" to if (link.type == "audio") "Sound" else "StillImage",
+                    "format" to link.mimeType,
+                    "identifier" to link.relativePath,
+                    "title" to link.mediaSubject,
+                    "description" to link.caption,
+                    "created" to link.capturedAt
+                )
+            }
+
+        val comCoordenada = occurrences.filter { it.latitude != null && it.longitude != null }
+        val datas = sessions.map { it.eventDate }.filter { it.isNotBlank() }.sorted()
+
+        val metadata = ArchiveMetadata(
+            datasetTitle = project.name,
+            creatorName = project.principalInvestigator.ifBlank { project.name },
+            organization = project.institution,
+            abstractText = project.description.ifBlank {
+                "Conjunto de dados de ocorrencia coletado com o Oikos FieldBook."
+            },
+            license = "Direitos reservados ao detentor do conjunto de dados. " +
+                "Defina uma licenca antes de publicar (recomendado: CC BY 4.0).",
+            methods = sessions.mapNotNull { it.samplingProtocol.ifBlank { null } }
+                .distinct()
+                .joinToString("; ")
+                .ifBlank { "Protocolo de amostragem nao informado." },
+            packageId = "oikos-fieldbook/PROJ-${project.id.toString().padStart(3, '0')}",
+            pubDate = LocalDate.now().toString(),
+            geographicDescription = sessions.mapNotNull { it.locality.ifBlank { null } }
+                .distinct()
+                .take(10)
+                .joinToString("; ")
+                .ifBlank { "Localidade nao informada." },
+            westBound = comCoordenada.minOfOrNull { it.longitude ?: 0.0 },
+            eastBound = comCoordenada.maxOfOrNull { it.longitude ?: 0.0 },
+            southBound = comCoordenada.minOfOrNull { it.latitude ?: 0.0 },
+            northBound = comCoordenada.maxOfOrNull { it.latitude ?: 0.0 },
+            beginDate = datas.firstOrNull().orEmpty(),
+            endDate = datas.lastOrNull().orEmpty(),
+            taxa = occurrences.mapNotNull { it.scientificName.ifBlank { null } }.distinct().sorted()
+        )
+
+        return DarwinCoreArchive.build(
+            occurrenceHeaders = cabecalhoCore,
+            occurrenceRows = linhasCore,
+            measurementHeaders = archiveMeasurementHeaders,
+            measurementRows = linhasMof,
+            multimediaHeaders = archiveMultimediaHeaders,
+            multimediaRows = linhasMidia,
+            metadata = metadata
+        )
     }
 
     fun validationWarnings(): String {
@@ -396,8 +494,12 @@ private class ExportPackage(
             "eventTime" to session.startTime,
             "locality" to session.locality,
             "habitat" to session.habitat,
+            "parentEventID" to session.parentEventId,
             "samplingProtocol" to session.samplingProtocol,
             "samplingEffort" to session.samplingEffort,
+            "sampleSizeValue" to decimal(session.sampleSizeValue),
+            "sampleSizeUnit" to session.sampleSizeUnit,
+            "verbatimEventDate" to session.verbatimEventDate,
             "recordedBy" to session.recordedBy,
             "decimalLatitude" to decimal(session.latitude),
             "decimalLongitude" to decimal(session.longitude),
@@ -500,7 +602,16 @@ private class ExportPackage(
         }
     }
 
-    private fun unitForMeasurement(key: String): String = when {
+    /**
+     * Unidade da medida. Vem do catalogo, onde o termo a declara; o fallback por
+     * substring do nome ficou como ultimo recurso para campos livres antigos.
+     */
+    private fun unitForMeasurement(key: String): String {
+        val declarada = DarwinCoreCatalog.byTerm[key]?.unit.orEmpty()
+        return declarada.ifBlank { unitGuessedFromName(key) }
+    }
+
+    private fun unitGuessedFromName(key: String): String = when {
         key.contains("temperature", ignoreCase = true) -> "Celsius"
         key.contains("humidity", ignoreCase = true) -> "percent"
         key.contains("height", ignoreCase = true) -> "meter"
@@ -590,9 +701,18 @@ private class ExportPackage(
 
     private fun associatedMedia(links: List<MediaLink>): String = links.joinToString("; ") { it.relativePath }
 
+    /**
+     * CSV para planilha. Leva BOM de UTF-8 e separador ponto-e-virgula porque o
+     * Excel em portugues do Brasil, ao abrir por duplo clique, assume
+     * Windows-1252 e ponto-e-virgula: sem isso os acentos quebram e tudo cai em
+     * uma coluna so. R e Python leem normalmente com sep=";" e encoding UTF-8.
+     * Os arquivos do Darwin Core Archive nao passam por aqui: eles sao TSV sem
+     * BOM, como o meta.xml declara.
+     */
     private fun csv(headers: List<String>, rows: List<Map<String, String>>): String = buildString {
-        appendLine(headers.joinToString(","))
-        rows.forEach { row -> appendLine(headers.joinToString(",") { csvCell(row[it].orEmpty()) }) }
+        append(UTF8_BOM)
+        appendLine(headers.joinToString(CSV_SEPARATOR))
+        rows.forEach { row -> appendLine(headers.joinToString(CSV_SEPARATOR) { csvCell(row[it].orEmpty()) }) }
     }
 
     private fun table(rows: List<Map<String, String>>): List<List<String>> {
@@ -606,7 +726,7 @@ private class ExportPackage(
     private fun decimal(value: Double?): String = value?.let { String.format(Locale.US, "%.8f", it).trimEnd('0').trimEnd('.') }.orEmpty()
     private fun csvCell(value: String): String {
         val escaped = value.replace("\"", "\"\"")
-        return if (escaped.any { it == ',' || it == '"' || it == '\n' || it == '\r' }) "\"$escaped\"" else escaped
+        return if (escaped.any { it == ';' || it == ',' || it == '"' || it == '\n' || it == '\r' }) "\"$escaped\"" else escaped
     }
 
     private fun safeToken(value: String): String = value.uppercase(Locale.ROOT)
@@ -634,10 +754,30 @@ private class ExportPackage(
 
     companion object {
         private val utmExportHeaders = listOf("verbatimCoordinates", "verbatimCoordinateSystem", "verbatimSRS", "utmZone", "utmHemisphere", "utmEasting", "utmNorthing")
-        private val sessionHeaders = listOf("projectID", "eventID", "eventDate", "eventTime", "locality", "habitat", "samplingProtocol", "samplingEffort", "recordedBy", "decimalLatitude", "decimalLongitude", "coordinateUncertaintyInMeters", "geodeticDatum") + utmExportHeaders + "eventRemarks"
-        private val mediaHeaders = listOf("mediaID", "projectID", "eventID", "occurrenceID", "mediaType", "fileName", "relativePath", "mimeType", "capturedAt", "decimalLatitude", "decimalLongitude", "coordinateUncertaintyInMeters", "caption", "mediaSubject", "bodyPartOrPlantPart", "behaviorContext", "notes", "associatedMedia")
+        private val sessionHeaders = listOf("projectID", "eventID", "parentEventID", "eventDate", "verbatimEventDate", "eventTime", "locality", "habitat", "samplingProtocol", "samplingEffort", "sampleSizeValue", "sampleSizeUnit", "recordedBy", "decimalLatitude", "decimalLongitude", "coordinateUncertaintyInMeters", "geodeticDatum") + utmExportHeaders + "eventRemarks"
+        // bodyPartOrPlantPart, behaviorContext e notes saiam repetindo
+        // literalmente mediaSubject e caption; a repeticao afirmava sobre o dado
+        // algo que nao era verdade e foi removida da exportacao.
+        private val mediaHeaders = listOf("mediaID", "projectID", "eventID", "occurrenceID", "mediaType", "fileName", "relativePath", "mimeType", "capturedAt", "decimalLatitude", "decimalLongitude", "coordinateUncertaintyInMeters", "caption", "mediaSubject", "associatedMedia")
         private val trackPointHeaders = listOf("trackID", "projectID", "eventID", "pointIndex", "decimalLatitude", "decimalLongitude", "altitude", "accuracy", "timestamp", "speed", "geodeticDatum") + utmExportHeaders
         private val measurementHeaders = listOf("occurrenceID", "eventID", "measurementType", "measurementValue", "measurementUnit", "measurementRemarks")
+
+        /** BOM de UTF-8: faz o Excel pt-BR reconhecer a codificacao. */
+        private const val UTF8_BOM = "\uFEFF"
+
+        /** Separador do CSV de planilha (nao vale para o TSV do DwC-A). */
+        private const val CSV_SEPARATOR = ";"
+
+        /** MeasurementOrFact do archive: coreid na coluna 0. */
+        private val archiveMeasurementHeaders = listOf(
+            "occurrenceID", "measurementType", "measurementValue", "measurementUnit",
+            "measurementRemarks"
+        )
+
+        /** Simple Multimedia do GBIF: coreid na coluna 0. */
+        private val archiveMultimediaHeaders = listOf(
+            "occurrenceID", "type", "format", "identifier", "title", "description", "created"
+        )
     }
 }
 
@@ -678,9 +818,6 @@ private data class MediaLink(
         "coordinateUncertaintyInMeters" to coordinateUncertaintyInMeters,
         "caption" to caption,
         "mediaSubject" to mediaSubject,
-        "bodyPartOrPlantPart" to bodyPartOrPlantPart,
-        "behaviorContext" to behaviorContext,
-        "notes" to notes,
         "associatedMedia" to relativePath
     )
 
@@ -753,11 +890,31 @@ private object XlsxWriter {
         rows.forEachIndexed { rowIndex, row ->
             append("""<row r="${rowIndex + 1}">""")
             row.forEachIndexed { columnIndex, value ->
-                append("""<c r="${cellName(columnIndex, rowIndex)}" t="inlineStr"><is><t>${xml(value)}</t></is></c>""")
+                val ref = cellName(columnIndex, rowIndex)
+                // Cabecalho sempre como texto; demais linhas viram numero quando
+                // o valor e numerico, para que latitude, longitude, DAP e
+                // contagens cheguem ao Excel calculaveis em vez de texto.
+                if (rowIndex > 0 && isNumeric(value)) {
+                    append("""<c r="$ref" t="n"><v>$value</v></c>""")
+                } else {
+                    append("""<c r="$ref" t="inlineStr"><is><t>${xml(value)}</t></is></c>""")
+                }
             }
             append("</row>")
         }
         append("</sheetData></worksheet>")
+    }
+
+    /**
+     * Numero em formato aceito pelo OpenXML: ponto decimal, sem separador de
+     * milhar e sem notacao cientifica ambigua. Strings como "01" ou "2026-09-19"
+     * continuam texto de proposito, para nao perder zeros a esquerda nem virar data.
+     */
+    private fun isNumeric(value: String): Boolean {
+        if (value.isBlank()) return false
+        if (value.length > 1 && value.startsWith("0") && !value.startsWith("0.")) return false
+        if (value.startsWith("+")) return false
+        return value.toDoubleOrNull() != null && value.none { it == 'e' || it == 'E' }
     }
 
     private fun cellName(columnIndex: Int, rowIndex: Int): String {
