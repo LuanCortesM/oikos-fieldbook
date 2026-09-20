@@ -99,11 +99,15 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -144,6 +148,8 @@ import com.oikos.fieldbook.util.CoordinateUtils
 import com.oikos.fieldbook.util.UtmHemisphere
 import com.oikos.fieldbook.util.flatJson
 import com.oikos.fieldbook.util.parseFlatJsonMap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
@@ -184,10 +190,13 @@ class MainActivity : ComponentActivity() {
         val deviceLanguage = currentDeviceUiLanguage()
         Configuration.getInstance().userAgentValue = packageName
         setContent {
-            var darkTheme by remember { mutableStateOf(true) }
-            var simpleMode by remember { mutableStateOf(true) }
+            // Tema e modo simples passam a persistir entre aberturas, junto do
+            // idioma, que ja persistia. Antes voltavam ao padrao a cada inicio
+            // e a cada rotacao de tela.
+            var darkTheme by remember { mutableStateOf(languagePrefs.getBoolean("dark_theme", true)) }
+            var simpleMode by remember { mutableStateOf(languagePrefs.getBoolean("simple_mode", true)) }
             var languageMode by remember { mutableStateOf(languagePrefs.getString("app_language", "auto") ?: "auto") }
-            var showLaunch by remember { mutableStateOf(true) }
+            var showLaunch by rememberSaveable { mutableStateOf(true) }
             val uiLanguage = when (languageMode) {
                 "pt" -> OikosLanguage.Portuguese
                 "en" -> OikosLanguage.English
@@ -211,8 +220,14 @@ class MainActivity : ComponentActivity() {
                                 darkTheme,
                                 simpleMode,
                                 languageMode,
-                                onThemeChange = { darkTheme = it },
-                                onSimpleModeChange = { simpleMode = it },
+                                onThemeChange = {
+                                    darkTheme = it
+                                    languagePrefs.edit().putBoolean("dark_theme", it).apply()
+                                },
+                                onSimpleModeChange = {
+                                    simpleMode = it
+                                    languagePrefs.edit().putBoolean("simple_mode", it).apply()
+                                },
                                 onLanguageModeChange = {
                                     languageMode = it
                                     languagePrefs.edit().putString("app_language", it).apply()
@@ -275,6 +290,50 @@ private fun OikosLaunchScreen() {
     }
 }
 
+/**
+ * Saver da navegacao.
+ *
+ * Sem isto o estado de tela vivia so em remember: girar o aparelho ou o Android
+ * matar o processo em segundo plano (comum em campo, com a tela do mapa aberta
+ * e pouca memoria) devolvia o usuario a lista de projetos. Serializa como lista
+ * de primitivos, que e o que o Bundle aceita.
+ */
+private val ScreenSaver: Saver<Screen, Any> = listSaver(
+    save = { tela ->
+        when (tela) {
+            is Screen.Projects -> listOf("projects")
+            is Screen.ProjectEdit -> listOf("projectEdit", tela.projectId)
+            is Screen.ProjectDetail -> listOf("projectDetail", tela.projectId)
+            is Screen.FieldConfig -> listOf("fieldConfig", tela.projectId)
+            is Screen.SessionEdit -> listOf("sessionEdit", tela.projectId, tela.sessionId)
+            is Screen.SessionDetail -> listOf("sessionDetail", tela.projectId, tela.sessionId)
+            is Screen.OccurrenceEdit -> listOf("occurrenceEdit", tela.projectId, tela.sessionId, tela.occurrenceId)
+            is Screen.Media -> listOf("media", tela.projectId, tela.sessionId, tela.occurrenceId)
+            is Screen.Export -> listOf("export", tela.projectId, tela.sessionId)
+            is Screen.Settings -> listOf("settings")
+            is Screen.About -> listOf("about")
+        }
+    },
+    restore = { valores ->
+        val id = valores.getOrNull(0) as? String
+        fun longEm(indice: Int): Long = (valores.getOrNull(indice) as? Long) ?: 0L
+        fun longOpcional(indice: Int): Long? = valores.getOrNull(indice) as? Long
+        when (id) {
+            "projectEdit" -> Screen.ProjectEdit(longOpcional(1))
+            "projectDetail" -> Screen.ProjectDetail(longEm(1))
+            "fieldConfig" -> Screen.FieldConfig(longEm(1))
+            "sessionEdit" -> Screen.SessionEdit(longEm(1), longOpcional(2))
+            "sessionDetail" -> Screen.SessionDetail(longEm(1), longEm(2))
+            "occurrenceEdit" -> Screen.OccurrenceEdit(longEm(1), longEm(2), longOpcional(3))
+            "media" -> Screen.Media(longEm(1), longEm(2), longOpcional(3))
+            "export" -> Screen.Export(longEm(1), longOpcional(2))
+            "settings" -> Screen.Settings
+            "about" -> Screen.About
+            else -> Screen.Projects
+        }
+    }
+)
+
 private sealed interface Screen {
     data object Projects : Screen
     data class ProjectEdit(val projectId: Long? = null) : Screen
@@ -299,7 +358,7 @@ private fun OikosApp(
     onSimpleModeChange: (Boolean) -> Unit,
     onLanguageModeChange: (String) -> Unit
 ) {
-    var screen by remember { mutableStateOf<Screen>(Screen.Projects) }
+    var screen by rememberSaveable(stateSaver = ScreenSaver) { mutableStateOf<Screen>(Screen.Projects) }
     val snackbarHostState = remember { SnackbarHostState() }
     val message by viewModel.message.collectAsState()
     val context = LocalContext.current
@@ -2410,10 +2469,32 @@ private fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val mapPrefs = remember { context.getSharedPreferences("oikos_map_settings", Context.MODE_PRIVATE) }
-    var cache by remember { mutableLongStateOf(viewModel.mediaFiles.cacheSizeBytes()) }
-    var mapCache by remember { mutableLongStateOf(viewModel.mediaFiles.mapCacheSizeBytes()) }
-    var files by remember { mutableLongStateOf(viewModel.mediaFiles.projectFilesSizeBytes()) }
-    var db by remember { mutableLongStateOf(viewModel.mediaFiles.databaseSizeBytes()) }
+    // Os quatro tamanhos exigem percorrer recursivamente o armazenamento do
+    // app. Eram calculados durante a composicao, na main thread: com muitas
+    // fotos isso segura a interface e pode gerar ANR. Agora sao medidos em
+    // Dispatchers.IO e a tela abre imediatamente com zero.
+    var cache by remember { mutableLongStateOf(0L) }
+    var mapCache by remember { mutableLongStateOf(0L) }
+    var files by remember { mutableLongStateOf(0L) }
+    var db by remember { mutableLongStateOf(0L) }
+    var medindoArmazenamento by remember { mutableStateOf(true) }
+    var recarregarArmazenamento by remember { mutableIntStateOf(0) }
+    LaunchedEffect(recarregarArmazenamento) {
+        medindoArmazenamento = true
+        val medidas = withContext(Dispatchers.IO) {
+            listOf(
+                viewModel.mediaFiles.cacheSizeBytes(),
+                viewModel.mediaFiles.mapCacheSizeBytes(),
+                viewModel.mediaFiles.projectFilesSizeBytes(),
+                viewModel.mediaFiles.databaseSizeBytes()
+            )
+        }
+        cache = medidas[0]
+        mapCache = medidas[1]
+        files = medidas[2]
+        db = medidas[3]
+        medindoArmazenamento = false
+    }
     var confirmClearCache by remember { mutableStateOf(false) }
     var confirmClearMapCache by remember { mutableStateOf(false) }
     var offlineMapCache by remember { mutableStateOf(mapPrefs.getBoolean("offline_map_cache", false)) }
@@ -2428,10 +2509,7 @@ private fun SettingsScreen(
             onConfirm = {
                 confirmClearCache = false
                 val removed = viewModel.mediaFiles.clearCache()
-                cache = viewModel.mediaFiles.cacheSizeBytes()
-                mapCache = viewModel.mediaFiles.mapCacheSizeBytes()
-                files = viewModel.mediaFiles.projectFilesSizeBytes()
-                db = viewModel.mediaFiles.databaseSizeBytes()
+                recarregarArmazenamento++
                 viewModel.showMessage(
                     if (removed > 0) "Cache limpo: ${humanSize(removed)} removidos." else "Cache já estava limpo."
                 )
@@ -2447,8 +2525,7 @@ private fun SettingsScreen(
             onConfirm = {
                 confirmClearMapCache = false
                 val removed = viewModel.mediaFiles.clearMapCache()
-                mapCache = viewModel.mediaFiles.mapCacheSizeBytes()
-                cache = viewModel.mediaFiles.cacheSizeBytes()
+                recarregarArmazenamento++
                 viewModel.showMessage(
                     if (removed > 0) "Cache do mapa apagado: ${humanSize(removed)} removidos." else "Cache do mapa já estava vazio."
                 )
@@ -2545,6 +2622,13 @@ private fun SettingsScreen(
                         Text(ui("Apagar cache do mapa"))
                     }
                 }
+            }
+            if (medindoArmazenamento) {
+                Text(
+                    ui("Calculando o espaço usado..."),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             Text("${ui("Arquivos de projetos")}: ${humanSize(files)}")
             Text("${ui("Banco local")}: ${humanSize(db)}")
@@ -2830,6 +2914,10 @@ private val englishText = mapOf(
     "Planilhas + fotos + áudios" to "Spreadsheets + photos + audio",
     "Formatos" to "Formats",
     "ZIP completo recomendado" to "Complete ZIP recommended",
+    "Darwin Core Archive (GBIF/SiBBr)" to "Darwin Core Archive (GBIF/SiBBr)",
+    "Calculando o espaço usado..." to "Calculating storage use...",
+    "Outro" to "Other",
+    "Valor livre" to "Free value",
     "Exportar e compartilhar/salvar" to "Export and share/save",
     "Depois de tocar no botão, escolha WhatsApp, Google Drive, Files/Arquivos ou outro app na tela de compartilhamento do Android." to "After tapping the button, choose WhatsApp, Google Drive, Files or another app in the Android share sheet.",
     "Compartilhar, salvar ou enviar exportação" to "Share, save or send export",
