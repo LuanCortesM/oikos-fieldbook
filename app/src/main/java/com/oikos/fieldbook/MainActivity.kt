@@ -2662,6 +2662,11 @@ private fun AboutScreen(modifier: Modifier, onBack: () -> Unit) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Oikos FieldBook", style = MaterialTheme.typography.headlineSmall)
+                    Text(
+                        "${ui("Versão")} ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
             Text(ui("Sobre o aplicativo"), style = MaterialTheme.typography.titleMedium)
                     Text(
                         ui("Produto desenvolvido para facilitar a rotina do pesquisador em campo, reunindo catalogação de ocorrências, fotos, áudios, coordenadas e trilhas GPS em um só lugar."),
@@ -2690,6 +2695,12 @@ private fun AboutScreen(modifier: Modifier, onBack: () -> Unit) {
                     Text(
                         ui("Mapas por © OpenStreetMap contributors."),
                         style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(ui("Uso de rede e privacidade"), style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        ui("A coleta funciona inteiramente offline: projetos, expedições, ocorrências, coordenadas, fotos e áudios ficam apenas no aparelho, e o app não envia esses dados a nenhum servidor. A internet é usada somente para baixar as imagens do mapa do OpenStreetMap, quando você abre a tela de mapa. Nessa requisição o servidor do OpenStreetMap recebe a área visualizada. Se o local da coleta for sensível, mantenha o aparelho sem rede ou evite abrir o mapa em campo; os registros continuam sendo salvos normalmente."),
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -2914,6 +2925,9 @@ private val englishText = mapOf(
     "Planilhas + fotos + áudios" to "Spreadsheets + photos + audio",
     "Formatos" to "Formats",
     "ZIP completo recomendado" to "Complete ZIP recommended",
+    "Versão" to "Version",
+    "Uso de rede e privacidade" to "Network use and privacy",
+    "A coleta funciona inteiramente offline: projetos, expedições, ocorrências, coordenadas, fotos e áudios ficam apenas no aparelho, e o app não envia esses dados a nenhum servidor. A internet é usada somente para baixar as imagens do mapa do OpenStreetMap, quando você abre a tela de mapa. Nessa requisição o servidor do OpenStreetMap recebe a área visualizada. Se o local da coleta for sensível, mantenha o aparelho sem rede ou evite abrir o mapa em campo; os registros continuam sendo salvos normalmente." to "Data collection works entirely offline: projects, expeditions, occurrences, coordinates, photos and audio stay on the device, and the app sends none of it to any server. The internet is used only to download OpenStreetMap map imagery when you open the map screen. In that request the OpenStreetMap server receives the viewed area. If the collection site is sensitive, keep the device offline or avoid opening the map in the field; records are still saved normally.",
     "Darwin Core Archive (GBIF/SiBBr)" to "Darwin Core Archive (GBIF/SiBBr)",
     "Calculando o espaço usado..." to "Calculating storage use...",
     "Outro" to "Other",

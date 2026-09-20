@@ -22,8 +22,8 @@ android {
         applicationId = "com.oikos.fieldbook"
         minSdk = 26
         targetSdk = 36
-        versionCode = 9
-        versionName = "0.1.7"
+        versionCode = 10
+        versionName = "0.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -71,6 +71,9 @@ android {
 
     buildFeatures {
         compose = true
+        // Necessario para a tela Sobre exibir a versao real em vez de um
+        // literal escrito a mao, que divergia da publicada.
+        buildConfig = true
     }
 }
 
