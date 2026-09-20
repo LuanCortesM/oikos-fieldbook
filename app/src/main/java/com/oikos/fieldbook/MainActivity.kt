@@ -876,8 +876,13 @@ private fun FieldConfigScreen(viewModel: AppViewModel, projectId: Long, modifier
     }
     Scaffold(modifier = modifier, topBar = { OikosTopBar("Campos Darwin Core", onBack) }) { padding ->
         LazyColumn(contentPadding = padding.plus(PaddingValues(16.dp)), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            fields.groupBy { it.groupName }.forEach { (group, groupFields) ->
-                item { Text(ui(fieldGroupDisplayName(group)), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp)) }
+            // Agrupa pelo nome exibido, nao pela chave crua: o catalogo herdou
+            // variantes com e sem acento do mesmo grupo ("Identificacao" e
+            // "Identificação"), que apareciam como duas secoes identicas.
+            // Normalizar aqui resolve sem migrar groupName no banco, o que
+            // quebraria o vinculo dos cards de modulo e do formType gravado.
+            fields.groupBy { fieldGroupDisplayName(it.groupName) }.forEach { (group, groupFields) ->
+                item { Text(ui(group), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp)) }
                 items(groupFields.sortedBy { it.displayOrder }) { field ->
                     Card {
                         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -3617,6 +3622,10 @@ private fun fieldGroupDisplayName(group: String): String = when (group) {
     "Ocorrencia" -> "Ocorrência"
     "Identificacao" -> "Identificação"
     "Anotacoes" -> "Anotações"
+    "Localização" -> "Localização"
+    "Identificação" -> "Identificação"
+    "Anotações" -> "Anotações"
+    "Mídia" -> "Mídia"
     else -> advancedGroupDisplayName(group)
 }
 
