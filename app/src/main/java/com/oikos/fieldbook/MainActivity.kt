@@ -78,6 +78,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -131,6 +133,7 @@ import com.oikos.fieldbook.data.OccurrenceEntity
 import com.oikos.fieldbook.data.ProjectEntity
 import com.oikos.fieldbook.data.SessionEntity
 import com.oikos.fieldbook.dwc.DarwinCoreCatalog
+import com.oikos.fieldbook.dwc.DwcVocabulary
 import com.oikos.fieldbook.export.ExportContent
 import com.oikos.fieldbook.export.ExportFormat
 import com.oikos.fieldbook.services.CapturedLocation
@@ -1777,9 +1780,23 @@ private fun OccurrenceEditScreen(
                         dynamicFieldsJson = flatJson(dynamicValues),
                         createdAt = existing?.createdAt ?: System.currentTimeMillis()
                     )
-                viewModel.saveOccurrenceWithMedia(occurrenceToSave, pendingMedia) {
-                    pendingMedia.clear()
-                    onBack()
+                // Campos marcados como obrigatorios na configuracao do projeto
+                // bloqueiam o salvamento. Ate a v0.1.7 a lista era calculada e
+                // descartada, e o interruptor "Obrig." nao tinha efeito algum.
+                val faltando = missingRequiredFields(
+                    enabledFields = enabledFields,
+                    occurrence = occurrenceToSave,
+                    dynamicValues = dynamicValues
+                )
+                if (faltando.isNotEmpty()) {
+                    viewModel.showMessage(
+                        "Preencha antes de salvar: " + faltando.joinToString(", ") { it.labelPt }
+                    )
+                } else {
+                    viewModel.saveOccurrenceWithMedia(occurrenceToSave, pendingMedia) {
+                        pendingMedia.clear()
+                        onBack()
+                    }
                 }
             }) { Icon(Icons.Default.Save, ui("Salvar")) }
         }
@@ -1791,17 +1808,36 @@ private fun OccurrenceEditScreen(
                 occurrenceType = occurrenceTypesFor(it).first()
             }
             ChipRow("Tipo de ocorrência", occurrenceTypesFor(formType).map { it to it }, occurrenceType) { occurrenceType = it }
-            DateInput("Data do registro", occurrenceDate) { occurrenceDate = it }
-            TimeInput("Hora do registro", occurrenceTime) { occurrenceTime = it }
-            TextInput("Registro científico", occurrenceID, help = "Identificador Darwin Core occurrenceID. Ele é gerado automaticamente e pode ficar oculto no uso comum.") { occurrenceID = it }
-            TextInput("Registro de campo", recordNumber, help = "Código amigável do ponto ou registro. Exemplo: P03, T1-P03 ou Registro #0003.") { recordNumber = it }
+            if (enabled("eventDate", enabledFields)) DateInput(label("eventDate", enabledFields, "Data do registro"), occurrenceDate) { occurrenceDate = it }
+            if (enabled("eventTime", enabledFields)) TimeInput(label("eventTime", enabledFields, "Hora do registro"), occurrenceTime) { occurrenceTime = it }
+            // occurrenceID continua sendo gerado sempre; o campo so aparece se o
+            // projeto pedir. Ocultar a caixa nao desliga o identificador.
+            if (enabled("occurrenceID", enabledFields)) TextInput(label("occurrenceID", enabledFields, "Registro científico"), occurrenceID, help = "Identificador Darwin Core occurrenceID. É gerado automaticamente; edite apenas se precisar casar com um identificador externo.") { occurrenceID = it }
+            if (enabled("recordNumber", enabledFields)) TextInput(label("recordNumber", enabledFields, "Registro de campo"), recordNumber, help = "Código amigável do ponto ou registro. Exemplo: P03, T1-P03 ou Registro #0003.") { recordNumber = it }
             if (enabled("scientificName", enabledFields)) TextInput(label("scientificName", enabledFields, "Nome da espécie"), scientificName, help = "Use o nome científico da espécie, se souber. Exemplo: Boana faber.") { scientificName = it }
             if (enabled("vernacularName", enabledFields)) TextInput(label("vernacularName", enabledFields, "Nome popular"), vernacularName) { vernacularName = it }
-            TextInput("basisOfRecord", basis) { basis = it }
-            if (enabled("occurrenceStatus", enabledFields)) TextInput(label("occurrenceStatus", enabledFields, "Status da ocorrência"), status) { status = it }
+            if (enabled("basisOfRecord", enabledFields)) DwcVocabularyInput(
+                label = label("basisOfRecord", enabledFields, "Natureza do registro"),
+                value = basis,
+                options = DwcVocabulary.basisOfRecord,
+                help = "Define se o registro é uma observação, um espécime tombado ou uma amostra. Exportado como dwc:basisOfRecord."
+            ) { basis = it }
+            if (enabled("occurrenceStatus", enabledFields)) DwcVocabularyInput(
+                label = label("occurrenceStatus", enabledFields, "Status da ocorrência"),
+                value = status,
+                options = DwcVocabulary.occurrenceStatus
+            ) { status = it }
             if (enabled("individualCount", enabledFields)) TextInput(label("individualCount", enabledFields, "Número de indivíduos"), count, KeyboardType.Number) { count = it }
-            if (enabled("sex", enabledFields)) TextInput(label("sex", enabledFields, "Sexo"), sex) { sex = it }
-            if (enabled("lifeStage", enabledFields)) TextInput(label("lifeStage", enabledFields, "Fase de vida"), lifeStage) { lifeStage = it }
+            if (enabled("sex", enabledFields)) DwcVocabularyInput(
+                label = label("sex", enabledFields, "Sexo"),
+                value = sex,
+                options = DwcVocabulary.sex
+            ) { sex = it }
+            if (enabled("lifeStage", enabledFields)) DwcVocabularyInput(
+                label = label("lifeStage", enabledFields, "Fase de vida"),
+                value = lifeStage,
+                options = DwcVocabulary.lifeStage
+            ) { lifeStage = it }
             if (enabled("behavior", enabledFields)) TextInput(label("behavior", enabledFields, "Comportamento"), behavior) { behavior = it }
             if (enabled("reproductiveCondition", enabledFields)) TextInput(label("reproductiveCondition", enabledFields, "Condição reprodutiva"), reproductive) { reproductive = it }
             if (enabled("recordedBy", enabledFields)) TextInput(label("recordedBy", enabledFields, "Quem coletou"), recordedBy) { recordedBy = it }
@@ -1818,7 +1854,7 @@ private fun OccurrenceEditScreen(
                 }
             }
             if (enabled("occurrenceRemarks", enabledFields)) TextInput(label("occurrenceRemarks", enabledFields, "Observações da ocorrência"), remarks, minLines = 3) { remarks = it }
-            TextInput("Anotações de campo", fieldNotes, minLines = 5, help = "Use para anotações rápidas, descrição detalhada, dúvidas de identificação, observações de laboratório ou coleção.") { fieldNotes = it }
+            if (enabled("fieldNotes", enabledFields)) TextInput(label("fieldNotes", enabledFields, "Anotações de campo"), fieldNotes, minLines = 5, help = "Use para anotações rápidas, descrição detalhada, dúvidas de identificação, observações de laboratório ou coleção.") { fieldNotes = it }
             OutlinedButton(onClick = { showAdvanced = !showAdvanced }) {
                 Text(if (showAdvanced) "Ocultar campos avançados" else "Mostrar campos avançados")
             }
@@ -1831,11 +1867,20 @@ private fun OccurrenceEditScreen(
                 .filterNot { it.dwcTerm in advancedOccurrenceTerms }
                 .forEach { field ->
                     val fieldLabel = "${field.labelPt} (${field.dwcTerm})"
+                    val definition = DarwinCoreCatalog.byTerm[field.dwcTerm]
                     when {
+                        definition != null && definition.vocabulary.isNotEmpty() ->
+                            DwcVocabularyInput(fieldLabel, dynamicValues[field.dwcTerm].orEmpty(), definition.vocabulary) { dynamicValues[field.dwcTerm] = it }
                         field.fieldType == "date" || field.dwcTerm.contains("Date", ignoreCase = true) ->
                             DateInput(fieldLabel, dynamicValues[field.dwcTerm].orEmpty()) { dynamicValues[field.dwcTerm] = it }
                         field.fieldType == "time" || field.dwcTerm.contains("Time", ignoreCase = true) ->
                             TimeInput(fieldLabel, dynamicValues[field.dwcTerm].orEmpty()) { dynamicValues[field.dwcTerm] = it }
+                        field.fieldType == "integer" ->
+                            TextInput(fieldLabel, dynamicValues[field.dwcTerm].orEmpty(), KeyboardType.Number) { dynamicValues[field.dwcTerm] = it }
+                        field.fieldType == "decimal" ->
+                            TextInput(fieldLabel, dynamicValues[field.dwcTerm].orEmpty(), KeyboardType.Decimal) { dynamicValues[field.dwcTerm] = it }
+                        field.fieldType == "long_text" ->
+                            TextInput(fieldLabel, dynamicValues[field.dwcTerm].orEmpty(), minLines = 3) { dynamicValues[field.dwcTerm] = it }
                         else ->
                             TextInput(fieldLabel, dynamicValues[field.dwcTerm].orEmpty()) { dynamicValues[field.dwcTerm] = it }
                     }
@@ -3235,6 +3280,160 @@ private fun TimeInput(label: String, value: String, onChange: (String) -> Unit) 
 }
 
 @Composable
+/**
+ * Campo de vocabulario controlado do Darwin Core.
+ *
+ * Os chips mostram o rotulo em portugues, mas o valor gravado e exportado e
+ * sempre o termo do padrao em ingles, que e o que GBIF, SiBBr e IPT consomem.
+ * "Outro" libera digitacao para os casos que o vocabulario nao cobre, sem
+ * impedir o registro em campo.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DwcVocabularyInput(
+    label: String,
+    value: String,
+    options: List<String>,
+    help: String? = null,
+    onChange: (String) -> Unit
+) {
+    val isFreeText = value.isNotBlank() && value !in options
+    var freeText by remember(label) { mutableStateOf(isFreeText) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+            if (help != null) HelpButton(label, help)
+        }
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            options.forEach { option ->
+                FilterChip(
+                    selected = !freeText && value == option,
+                    onClick = {
+                        freeText = false
+                        onChange(option)
+                    },
+                    label = { Text(dwcValueLabel(option)) }
+                )
+            }
+            FilterChip(
+                selected = freeText,
+                onClick = { freeText = true },
+                label = { Text(ui("Outro")) }
+            )
+        }
+        if (freeText) {
+            TextInput(ui("Valor livre"), value, help = "Sai na exportação exatamente como digitado.") { onChange(it) }
+        } else if (value.isNotBlank()) {
+            Text(
+                "dwc: $value",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+/** Rotulo em portugues para um valor de vocabulario controlado. */
+private fun dwcValueLabel(value: String): String = when (value) {
+    "HumanObservation" -> "Observação"
+    "MachineObservation" -> "Registro automático"
+    "PreservedSpecimen" -> "Espécime tombado"
+    "MaterialSample" -> "Amostra"
+    "LivingSpecimen" -> "Espécime vivo"
+    "FossilSpecimen" -> "Fóssil"
+    "MaterialCitation" -> "Citação de material"
+    "present" -> "Presente"
+    "absent" -> "Ausente"
+    "male" -> "Macho"
+    "female" -> "Fêmea"
+    "hermaphrodite" -> "Hermafrodita"
+    "undetermined", "unknown", "uncertain" -> "Indeterminado"
+    "egg" -> "Ovo"
+    "larva" -> "Larva"
+    "tadpole" -> "Girino"
+    "juvenile" -> "Jovem"
+    "subadult" -> "Subadulto"
+    "adult" -> "Adulto"
+    "seedling" -> "Plântula"
+    "sapling" -> "Juvenil arbóreo"
+    "seed" -> "Semente"
+    "kingdom" -> "Reino"
+    "phylum" -> "Filo"
+    "class" -> "Classe"
+    "order" -> "Ordem"
+    "family" -> "Família"
+    "genus" -> "Gênero"
+    "species" -> "Espécie"
+    "subspecies" -> "Subespécie"
+    "variety" -> "Variedade"
+    "form" -> "Forma"
+    "holotype" -> "Holótipo"
+    "paratype" -> "Parátipo"
+    "isotype" -> "Isótipo"
+    "lectotype" -> "Lectótipo"
+    "neotype" -> "Neótipo"
+    "syntype" -> "Sintipo"
+    "topotype" -> "Topótipo"
+    "notAType" -> "Não é tipo"
+    "native" -> "Nativa"
+    "nativeReintroduced" -> "Nativa reintroduzida"
+    "introduced" -> "Introduzida"
+    "introducedAssistedColonisation" -> "Introduzida (colonização assistida)"
+    "vagrant" -> "Errante"
+    "captive" -> "Cativeiro"
+    "cultivated" -> "Cultivada"
+    "released" -> "Solta"
+    "failing" -> "Em declínio"
+    "casual" -> "Casual"
+    "reproducing" -> "Reproduzindo"
+    "established" -> "Estabelecida"
+    "colonising" -> "Colonizando"
+    "invasive" -> "Invasora"
+    "widespreadInvasive" -> "Invasora amplamente distribuída"
+    "corridor" -> "Corredor"
+    "escapeFromConfinement" -> "Escape de cativeiro"
+    "releaseInNature" -> "Soltura na natureza"
+    "transportContaminant" -> "Contaminante de transporte"
+    "transportStowaway" -> "Clandestino em transporte"
+    "unaided" -> "Dispersão própria"
+    "alive" -> "Vivo"
+    "dead" -> "Morto"
+    "mixed" -> "Misto"
+    "unverified" -> "Não verificada"
+    "verifiedBySpecialist" -> "Verificada por especialista"
+    "requiresVerification" -> "Requer verificação"
+    "verified" -> "Verificada"
+    "exsicata" -> "Exsicata"
+    "alcohol" -> "Álcool"
+    "driedWhole" -> "Seco inteiro"
+    "pinned" -> "Alfinetado"
+    "tissueInSilica" -> "Tecido em sílica"
+    "tissueInEthanol" -> "Tecido em etanol"
+    "skeleton" -> "Esqueleto"
+    "skin" -> "Pele"
+    "slide" -> "Lâmina"
+    "photographOnly" -> "Somente fotografia"
+    "inCollection" -> "Depositado"
+    "inProcessing" -> "Em processamento"
+    "onLoan" -> "Emprestado"
+    "missing" -> "Extraviado"
+    "destroyed" -> "Destruído"
+    "notCollected" -> "Não coletado"
+    "metre" -> "metro"
+    "squareMetre" -> "metro quadrado"
+    "hectare" -> "hectare"
+    "kilometre" -> "quilômetro"
+    "hour" -> "hora"
+    "minute" -> "minuto"
+    "day" -> "dia"
+    "trapNight" -> "armadilha-noite"
+    "individual" -> "indivíduo"
+    else -> value
+}
+
 private fun ChipRow(title: String, options: List<Pair<String, String>>, selected: String, onSelected: (String) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(ui(title), style = MaterialTheme.typography.labelLarge)
@@ -3515,6 +3714,48 @@ private val noteAdvancedFields = listOf(
     "labNotes" to "Observações para laboratório",
     "collectionNotes" to "Observações para herbário/coleção"
 )
+
+/**
+ * Campos habilitados e marcados como obrigatorios que ainda estao vazios.
+ *
+ * Le o valor onde ele de fato mora: colunas tipadas da OccurrenceEntity para os
+ * termos do nucleo, e dynamicFieldsJson para o restante do catalogo.
+ */
+private fun missingRequiredFields(
+    enabledFields: List<FieldConfigEntity>,
+    occurrence: OccurrenceEntity,
+    dynamicValues: Map<String, String>
+): List<FieldConfigEntity> {
+    val tipados: Map<String, String> = mapOf(
+        "occurrenceID" to occurrence.occurrenceId,
+        "basisOfRecord" to occurrence.basisOfRecord,
+        "scientificName" to occurrence.scientificName,
+        "vernacularName" to occurrence.vernacularName,
+        "recordNumber" to occurrence.recordNumber,
+        "occurrenceStatus" to occurrence.occurrenceStatus,
+        "individualCount" to occurrence.individualCount?.toString().orEmpty(),
+        "sex" to occurrence.sex,
+        "lifeStage" to occurrence.lifeStage,
+        "behavior" to occurrence.behavior,
+        "reproductiveCondition" to occurrence.reproductiveCondition,
+        "recordedBy" to occurrence.recordedBy,
+        "identifiedBy" to occurrence.identifiedBy,
+        "dateIdentified" to occurrence.dateIdentified,
+        "occurrenceRemarks" to occurrence.occurrenceRemarks,
+        "fieldNotes" to occurrence.fieldNotes,
+        "decimalLatitude" to occurrence.latitude?.toString().orEmpty(),
+        "decimalLongitude" to occurrence.longitude?.toString().orEmpty(),
+        "minimumElevationInMeters" to occurrence.altitude?.toString().orEmpty(),
+        "coordinateUncertaintyInMeters" to occurrence.coordinateUncertaintyInMeters?.toString().orEmpty(),
+        "geodeticDatum" to occurrence.geodeticDatum
+    )
+    return enabledFields
+        .filter { it.required }
+        .filter { campo ->
+            val valor = tipados[campo.dwcTerm] ?: dynamicValues[campo.dwcTerm].orEmpty()
+            valor.isBlank()
+        }
+}
 
 private fun enabled(term: String, fields: List<FieldConfigEntity>): Boolean = fields.any { it.dwcTerm == term && it.enabled }
 @Composable

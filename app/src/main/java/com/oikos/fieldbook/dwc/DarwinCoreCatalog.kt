@@ -77,9 +77,12 @@ object DwcVocabulary {
 
 object DarwinCoreCatalog {
     val recommended: List<DarwinCoreField> = listOf(
-        DarwinCoreField("scientificName", "Nome da espécie", "Species name", "Básicos", order = 1),
+        DarwinCoreField("occurrenceID", "Registro científico (occurrenceID)", "Occurrence ID", "Básicos", enabled = false, order = 0),
+        DarwinCoreField("basisOfRecord", "Natureza do registro", "Basis of record", "Básicos", order = 1, vocabulary = DwcVocabulary.basisOfRecord),
+        DarwinCoreField("scientificName", "Nome da espécie", "Species name", "Básicos", order = 2),
         DarwinCoreField("vernacularName", "Nome popular", "Common name", "Básicos", order = 2),
         DarwinCoreField("eventDate", "Data da coleta", "Collection date", "Básicos", "date", true, false, 3),
+        DarwinCoreField("eventTime", "Hora do registro", "Event time", "Básicos", "time", true, false, 4),
         DarwinCoreField("recordedBy", "Quem coletou", "Recorded by", "Básicos", order = 4),
         DarwinCoreField("decimalLatitude", "Latitude", "Latitude", "Localizacao", "decimal", true, false, 5),
         DarwinCoreField("decimalLongitude", "Longitude", "Longitude", "Localizacao", "decimal", true, false, 6),
