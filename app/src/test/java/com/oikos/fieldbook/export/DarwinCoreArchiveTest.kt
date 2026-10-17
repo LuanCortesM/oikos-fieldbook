@@ -33,7 +33,7 @@ class DarwinCoreArchiveTest {
         creatorName = "MACIEL, L. S. C.",
         organization = "Instituicao",
         abstractText = "Resumo.",
-        license = "CC BY 4.0",
+        licenseCode = "CC-BY-4.0",
         methods = "Parcelas de 100 m2",
         packageId = "oikos-fieldbook/PROJ-001",
         pubDate = "2026-09-19",
@@ -160,22 +160,56 @@ class DarwinCoreArchiveTest {
 
     @Test
     fun `acentos sobrevivem em utf8`() {
+        // Ate a v0.2.0 este teste usava so texto sem acento e nao verificava
+        // o que o nome prometia.
+        val localidade = "São João do Piauí, região de várzea"
+        val titulo = "Inventário florístico da Caatinga: bromélias e anuros"
         val bytes = DarwinCoreArchive.build(
             occurrenceHeaders = listOf("occurrenceID", "locality"),
-            occurrenceRows = listOf(mapOf("occurrenceID" to "occ-1", "locality" to "Sao Joao do Piaui, regiao de varzea")),
+            occurrenceRows = listOf(mapOf("occurrenceID" to "occ-1", "locality" to localidade)),
             measurementHeaders = emptyList(),
             measurementRows = emptyList(),
             multimediaHeaders = emptyList(),
             multimediaRows = emptyList(),
-            metadata = metadata.copy(datasetTitle = "Inventario floristico da Caatinga")
+            metadata = metadata.copy(datasetTitle = titulo)
         )
-        var eml = ""
+        val arquivos = mutableMapOf<String, String>()
         ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
             while (true) {
                 val e = zip.nextEntry ?: break
-                if (e.name == "eml.xml") eml = zip.readBytes().toString(Charsets.UTF_8)
+                arquivos[e.name] = zip.readBytes().toString(Charsets.UTF_8)
             }
         }
-        assertTrue(eml.contains("Inventario floristico da Caatinga"))
+        assertTrue(arquivos.getValue("eml.xml").contains(titulo))
+        assertTrue(arquivos.getValue("occurrence.txt").contains(localidade))
+    }
+
+    @Test
+    fun `eml traz contato e criador validos sem pessoa responsavel`() {
+        val eml = DarwinCoreArchive.emlXml(metadata.copy(creatorName = "", organization = ""))
+        // Sem pessoa nem instituicao, o titulo entra como organizacao: o
+        // esquema EML exige ao menos um dos dois em creator e contact.
+        assertTrue(eml.contains("<contact>"))
+        assertTrue(eml.contains("<organizationName>Levantamento &quot;Caatinga&quot; &amp; Cerrado</organizationName>"))
+        assertFalse(eml.contains("<surName></surName>"))
+    }
+
+    @Test
+    fun `contact vem depois de coverage e antes de methods como o esquema exige`() {
+        val eml = DarwinCoreArchive.emlXml(metadata)
+        val coverage = eml.indexOf("<coverage>")
+        val contact = eml.indexOf("<contact>")
+        val methods = eml.indexOf("<methods>")
+        assertTrue(coverage in 0 until contact)
+        assertTrue(contact < methods)
+        assertTrue(eml.indexOf("<metadataProvider>") in eml.indexOf("</creator>") until eml.indexOf("<pubDate>"))
+    }
+
+    @Test
+    fun `licenca sai no formato reconhecido pelo GBIF`() {
+        assertTrue(DarwinCoreArchive.licenseParagraph("CC-BY-4.0").contains("http://creativecommons.org/licenses/by/4.0/legalcode"))
+        assertTrue(DarwinCoreArchive.licenseParagraph("CC0-1.0").contains("http://creativecommons.org/publicdomain/zero/1.0/legalcode"))
+        assertTrue(DarwinCoreArchive.licenseParagraph("CC-BY-NC-4.0").contains("http://creativecommons.org/licenses/by-nc/4.0/legalcode"))
+        assertTrue(DarwinCoreArchive.licenseParagraph("").contains("não definida"))
     }
 }

@@ -23,6 +23,20 @@ data class ProjectEntity(
     val enableFauna: Boolean = true,
     val enableBotany: Boolean = false,
     val enableFungi: Boolean = false,
+    /**
+     * Licenca do conjunto de dados para o eml.xml: "CC0-1.0", "CC-BY-4.0",
+     * "CC-BY-NC-4.0" ou vazio (ainda nao definida). O GBIF so registra conjuntos
+     * com uma dessas tres.
+     */
+    val license: String = "",
+    /**
+     * Endereco publico onde as midias serao hospedadas (Zenodo, site do
+     * laboratorio). Sem ele o Darwin Core Archive nao inclui a extensao de
+     * multimidia, porque o padrao exige URL, nao caminho local.
+     */
+    val mediaBaseUrl: String = "",
+    /** CSV de planilha: "br" (; e virgula decimal) ou "intl" (, e ponto decimal). */
+    val csvStyle: String = "br",
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 )

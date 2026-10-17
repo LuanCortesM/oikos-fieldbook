@@ -150,6 +150,9 @@ interface GpsTrackDao {
     @Query("SELECT * FROM gps_tracks WHERE id = :trackId")
     suspend fun getTrack(trackId: Long): GpsTrackEntity?
 
+    @Query("SELECT * FROM gps_tracks WHERE active = 1 ORDER BY startTime DESC")
+    suspend fun getActiveTracks(): List<GpsTrackEntity>
+
     @Query("SELECT * FROM gps_track_points WHERE trackId = :trackId ORDER BY timestamp")
     suspend fun getPoints(trackId: Long): List<GpsTrackPointEntity>
 

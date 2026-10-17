@@ -25,7 +25,7 @@ class PureMp3AudioRecorder {
 
     @SuppressLint("MissingPermission")
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
-    fun start(file: File) {
+    fun start(file: File, preferredSources: List<Int> = listOf(MediaRecorder.AudioSource.MIC)) {
         stop()
         file.parentFile?.mkdirs()
         val encoder = runCatching { MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_MPEG) }
@@ -41,58 +41,92 @@ class PureMp3AudioRecorder {
             }
         val minBuffer = AudioRecord.getMinBufferSize(sampleRate, channelConfig, pcmFormat)
         val bufferSize = minBuffer.coerceAtLeast(sampleRate)
-        val recorder = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
-            sampleRate,
-            channelConfig,
-            pcmFormat,
-            bufferSize
-        )
+        // Mesma ordem de fontes do WAV: sem processamento quando possivel.
+        var chosen: AudioRecord? = null
+        for (source in preferredSources + MediaRecorder.AudioSource.MIC) {
+            val candidate = runCatching { AudioRecord(source, sampleRate, channelConfig, pcmFormat, bufferSize) }.getOrNull()
+            if (candidate?.state == AudioRecord.STATE_INITIALIZED) {
+                chosen = candidate
+                break
+            }
+            candidate?.release()
+        }
+        val recorder: AudioRecord = chosen ?: run {
+            encoder.release()
+            throw IllegalStateException("Microfone indisponível: outro app pode estar gravando.")
+        }
         audioRecord = recorder
         codec = encoder
+        lastError = null
+        recordedMicros = 0L
         isRecording.set(true)
         worker = thread(name = "oikos-mp3-recorder") {
-            FileOutputStream(file).use { output ->
-                val info = MediaCodec.BufferInfo()
-                val pcm = ByteArray(bufferSize)
-                var presentationTimeUs = 0L
-                encoder.start()
-                recorder.startRecording()
-                while (isRecording.get()) {
-                    val inputIndex = encoder.dequeueInputBuffer(10_000)
-                    if (inputIndex >= 0) {
-                        val input = encoder.getInputBuffer(inputIndex)
-                        input?.clear()
-                        val read = recorder.read(pcm, 0, pcm.size)
-                        if (read > 0 && input != null) {
-                            input.put(pcm, 0, read)
-                            encoder.queueInputBuffer(inputIndex, 0, read, presentationTimeUs, 0)
-                            presentationTimeUs += read / 2L * 1_000_000L / sampleRate
+            try {
+                FileOutputStream(file).use { output ->
+                    val info = MediaCodec.BufferInfo()
+                    val pcm = ByteArray(bufferSize)
+                    var presentationTimeUs = 0L
+                    encoder.start()
+                    recorder.startRecording()
+                    while (isRecording.get()) {
+                        val inputIndex = encoder.dequeueInputBuffer(10_000)
+                        if (inputIndex >= 0) {
+                            val input = encoder.getInputBuffer(inputIndex)
+                            input?.clear()
+                            val read = recorder.read(pcm, 0, pcm.size)
+                            // Buffer retirado do encoder sempre volta, mesmo vazio.
+                            val size = if (read > 0 && input != null) read else 0
+                            if (size > 0) input?.put(pcm, 0, size)
+                            encoder.queueInputBuffer(inputIndex, 0, size, presentationTimeUs, 0)
+                            presentationTimeUs += size / 2L * 1_000_000L / sampleRate
+                            recordedMicros = presentationTimeUs
                         }
+                        drainEncoder(encoder, info, output)
                     }
-                    drainEncoder(encoder, info, output)
+                    runCatching { recorder.stop() }
+                    // Fim de fluxo com prazo: se o encoder nao confirmar em 3 s,
+                    // fecha assim mesmo em vez de girar para sempre.
+                    val deadline = System.currentTimeMillis() + 3_000L
+                    var eosQueued = false
+                    var done = false
+                    while (!done && System.currentTimeMillis() < deadline) {
+                        if (!eosQueued) {
+                            val inputIndex = encoder.dequeueInputBuffer(10_000)
+                            if (inputIndex >= 0) {
+                                encoder.queueInputBuffer(inputIndex, 0, 0, presentationTimeUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                                eosQueued = true
+                            }
+                        }
+                        done = drainEncoder(encoder, info, output)
+                    }
+                    runCatching { encoder.stop() }
                 }
-                val inputIndex = encoder.dequeueInputBuffer(10_000)
-                if (inputIndex >= 0) {
-                    encoder.queueInputBuffer(inputIndex, 0, 0, presentationTimeUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                }
-                var done = false
-                while (!done) {
-                    done = drainEncoder(encoder, info, output)
-                }
-                runCatching { recorder.stop() }
-                runCatching { encoder.stop() }
+            } catch (error: Throwable) {
+                lastError = error
+            } finally {
+                runCatching { recorder.release() }
+                runCatching { encoder.release() }
             }
-            recorder.release()
-            encoder.release()
         }
     }
 
+    @Volatile
+    var lastError: Throwable? = null
+        private set
+
+    @Volatile
+    private var recordedMicros: Long = 0L
+
+    fun durationMillis(): Long = recordedMicros / 1000L
+
+    /**
+     * Para a gravacao. A thread de gravacao e quem libera microfone e encoder;
+     * liberar daqui, com a leitura ainda em curso, podia derrubar o app.
+     * Chamar fora da main thread.
+     */
     fun stop() {
         if (!isRecording.getAndSet(false)) return
-        worker?.join(1500)
-        runCatching { audioRecord?.release() }
-        runCatching { codec?.release() }
+        worker?.join(5_000)
         audioRecord = null
         codec = null
         worker = null

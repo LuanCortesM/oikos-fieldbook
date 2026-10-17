@@ -56,14 +56,14 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.GpsFixed
-import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.DarkMode
@@ -82,6 +82,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -124,6 +125,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import com.oikos.fieldbook.services.PhotoMetadata
+import com.oikos.fieldbook.ui.FormState
+import com.oikos.fieldbook.ui.rememberFormState
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -146,6 +157,7 @@ import com.oikos.fieldbook.services.WavAudioRecorder
 import com.oikos.fieldbook.ui.theme.OikosTheme
 import com.oikos.fieldbook.util.CoordinateUtils
 import com.oikos.fieldbook.util.UtmHemisphere
+import com.oikos.fieldbook.util.Axis
 import com.oikos.fieldbook.util.flatJson
 import com.oikos.fieldbook.util.parseFlatJsonMap
 import kotlinx.coroutines.Dispatchers
@@ -237,6 +249,18 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * App saindo da tela (nao rotacao): a gravacao de audio e encerrada e
+     * salva. Em segundo plano o Android 9+ entrega silencio no lugar do som, e
+     * a gravacao seguiria ocupando o microfone sem ninguem ver.
+     */
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) {
+            viewModel.stopRecording("Gravação encerrada e salva: o app saiu da tela.")
         }
     }
 
@@ -449,9 +473,7 @@ private fun OikosApp(
                 onDeleted = { screen = Screen.ProjectDetail(current.projectId) },
                 requestLocation = requestLocation
             )
-            is Screen.OccurrenceEdit -> OccurrenceEditScreen(viewModel, current.projectId, current.sessionId, current.occurrenceId, simpleMode, Modifier.padding(padding), requestLocation, { screen = Screen.SessionDetail(current.projectId, current.sessionId) }, onDeleted = { screen = Screen.SessionDetail(current.projectId, current.sessionId) }) {
-                screen = Screen.Media(current.projectId, current.sessionId, it)
-            }
+            is Screen.OccurrenceEdit -> OccurrenceEditScreen(viewModel, current.projectId, current.sessionId, current.occurrenceId, simpleMode, Modifier.padding(padding), requestLocation, { screen = Screen.SessionDetail(current.projectId, current.sessionId) }, onDeleted = { screen = Screen.SessionDetail(current.projectId, current.sessionId) })
             is Screen.Media -> MediaScreen(viewModel, current.projectId, current.sessionId, current.occurrenceId, Modifier.padding(padding)) {
                 screen = if (current.occurrenceId == null) Screen.SessionDetail(current.projectId, current.sessionId) else Screen.OccurrenceEdit(current.projectId, current.sessionId, current.occurrenceId)
             }
@@ -485,9 +507,11 @@ private fun Screen.backDestination(): Screen = when (this) {
 @Composable
 private fun OikosTopBar(title: String, onBack: (() -> Unit)? = null, actions: @Composable () -> Unit = {}) {
     CenterAlignedTopAppBar(
-        title = { Text(ui(title)) },
+        // Uma linha com reticencias: em tela de 320 dp o titulo quebrava letra
+        // a letra ("Exped / icao / 2026...") espremido pelos icones.
+        title = { Text(ui(title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
         navigationIcon = {
-            if (onBack != null) IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, ui("Voltar")) }
+            if (onBack != null) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, ui("Voltar")) }
         },
         actions = { actions() }
     )
@@ -524,10 +548,11 @@ private fun ProjectListScreen(
                 IconButton(onClick = onStorage) { Icon(Icons.Default.Settings, ui("Configurações")) }
                 TextButton(onClick = onAbout) { Text(ui("Sobre")) }
             })
-        },
-        floatingActionButton = { FloatingActionButton(onClick = onCreate) { Icon(Icons.Default.Add, ui("Novo projeto")) } }
+        }
     ) { padding ->
-        LazyColumn(contentPadding = padding.plus(PaddingValues(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 96.dp)), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        // Sem botao flutuante: o "Criar projeto" grande ja fica no topo, e o
+        // botao flutuante cobria os selos do cartao em telas de 320 dp.
+        LazyColumn(contentPadding = padding.plus(PaddingValues(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 32.dp)), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             item {
                 AdaptiveContent {
                     Column(
@@ -635,38 +660,58 @@ private fun ProjectEditScreen(viewModel: AppViewModel, projectId: Long?, modifie
     val defaultProjectLanguage = if (LocalOikosLanguage.current == OikosLanguage.Portuguese) "pt" else "en"
     val existing by (projectId?.let { viewModel.observeProject(it) } ?: kotlinx.coroutines.flow.flowOf(null)).collectAsState(initial = null)
     val savedFields by (projectId?.let { viewModel.observeFields(it) } ?: kotlinx.coroutines.flow.flowOf(emptyList())).collectAsState(initial = emptyList())
-    val draftFields = remember {
-        mutableStateListOf<FieldConfigEntity>().also { list ->
-            list.addAll(
-                DarwinCoreCatalog.allFields.map {
-                    FieldConfigEntity(
-                        projectId = 0,
-                        dwcTerm = it.term,
-                        labelPt = it.labelPt,
-                        labelEn = it.labelEn,
-                        enabled = it.enabled,
-                        required = it.required,
-                        fieldType = it.type,
-                        groupName = it.group,
-                        displayOrder = it.order
-                    )
-                }
+    // Todo o formulario, inclusive a escolha de campos de um projeto novo,
+    // sobrevive a rotacao e ao encerramento do app em segundo plano.
+    val form = rememberFormState("project:${projectId ?: "new"}")
+    LaunchedEffect(existing, projectId) {
+        if (form.initialized) return@LaunchedEffect
+        if (projectId == null) {
+            form.load(
+                mapOf(
+                    "datum" to "SIRGAS 2000", "coordFormat" to "DD", "photoQuality" to "medium", "audioFormat" to "wav",
+                    "enableFauna" to "true", "enableBotany" to "false", "enableFungi" to "false", "csvStyle" to "br"
+                )
+            )
+        } else {
+            val project = existing ?: return@LaunchedEffect
+            form.load(
+                mapOf(
+                    "name" to project.name, "description" to project.description, "institution" to project.institution,
+                    "pi" to project.principalInvestigator, "datum" to project.defaultDatum, "coordFormat" to project.coordinateFormat,
+                    "photoQuality" to project.photoQuality, "audioFormat" to project.audioFormat,
+                    "enableFauna" to project.enableFauna.toString(), "enableBotany" to project.enableBotany.toString(),
+                    "enableFungi" to project.enableFungi.toString(), "license" to project.license,
+                    "mediaBaseUrl" to project.mediaBaseUrl, "csvStyle" to project.csvStyle
+                )
             )
         }
     }
+    var name by form.field("name")
+    var description by form.field("description")
+    var institution by form.field("institution")
+    var pi by form.field("pi")
+    var mediaBaseUrl by form.field("mediaBaseUrl")
+    val enableFauna = form.bool("enableFauna", true)
+    val enableBotany = form.bool("enableBotany", false)
+    val enableFungi = form.bool("enableFungi", false)
+    var openFieldGroup by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // Projeto novo: escolhas por termo guardadas no formulario como "ligado,obrigatorio".
+    val draftFields = DarwinCoreCatalog.allFields.map { definition ->
+        val choice = form.values["field:${definition.term}"]?.split(",")
+        FieldConfigEntity(
+            projectId = 0,
+            dwcTerm = definition.term,
+            labelPt = definition.labelPt,
+            labelEn = definition.labelEn,
+            enabled = choice?.getOrNull(0)?.let { it == "1" } ?: definition.enabled,
+            required = choice?.getOrNull(1)?.let { it == "1" } ?: definition.required,
+            fieldType = definition.type,
+            groupName = definition.group,
+            displayOrder = definition.order
+        )
+    }
     val fields = if (projectId == null) draftFields else savedFields
-    var name by remember(existing?.id) { mutableStateOf(existing?.name.orEmpty()) }
-    var description by remember(existing?.id) { mutableStateOf(existing?.description.orEmpty()) }
-    var institution by remember(existing?.id) { mutableStateOf(existing?.institution.orEmpty()) }
-    var pi by remember(existing?.id) { mutableStateOf(existing?.principalInvestigator.orEmpty()) }
-    var datum by remember(existing?.id) { mutableStateOf(existing?.defaultDatum ?: "SIRGAS 2000") }
-    var coordFormat by remember(existing?.id) { mutableStateOf(existing?.coordinateFormat ?: "DD") }
-    var photoQuality by remember(existing?.id) { mutableStateOf(existing?.photoQuality ?: "medium") }
-    var audioFormat by remember(existing?.id) { mutableStateOf(existing?.audioFormat ?: "wav") }
-    var enableFauna by remember(existing?.id) { mutableStateOf(existing?.enableFauna ?: true) }
-    var enableBotany by remember(existing?.id) { mutableStateOf(existing?.enableBotany ?: false) }
-    var enableFungi by remember(existing?.id) { mutableStateOf(existing?.enableFungi ?: false) }
-    var openFieldGroup by remember(existing?.id) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(projectId) {
         projectId?.let { viewModel.ensureFieldCatalog(it) }
@@ -674,62 +719,122 @@ private fun ProjectEditScreen(viewModel: AppViewModel, projectId: Long?, modifie
 
     fun updateProjectField(field: FieldConfigEntity) {
         if (projectId == null) {
-            val index = draftFields.indexOfFirst { it.dwcTerm == field.dwcTerm }
-            if (index >= 0) draftFields[index] = field
+            form["field:${field.dwcTerm}"] = "${if (field.enabled) 1 else 0},${if (field.required) 1 else 0}"
         } else {
             viewModel.updateField(field)
         }
     }
 
+    val guardedBack = rememberGuardedBack(form.dirty, onBack = onBack)
+
     Scaffold(
         modifier = modifier,
-        topBar = { OikosTopBar(if (projectId == null) "Novo projeto" else "Editar projeto", onBack) },
+        topBar = { OikosTopBar(if (projectId == null) "Novo projeto" else "Editar projeto", guardedBack) },
         floatingActionButton = {
             FloatingActionButton(onClick = {
-                if (name.isNotBlank()) {
-                    viewModel.saveProject(
-                        ProjectEntity(
-                            id = existing?.id ?: 0L,
-                            name = name.trim(),
-                            description = description,
-                            institution = institution,
-                            principalInvestigator = pi,
-                            language = existing?.language ?: defaultProjectLanguage,
-                            defaultDatum = datum,
-                            coordinateFormat = coordFormat,
-                            photoQuality = photoQuality,
-                            audioFormat = audioFormat,
-                            enableFauna = enableFauna,
-                            enableBotany = enableBotany,
-                            enableFungi = enableFungi,
-                            createdAt = existing?.createdAt ?: System.currentTimeMillis()
-                        ),
-                    ) { savedId ->
-                        if (projectId == null) {
-                            viewModel.saveFieldConfiguration(savedId, draftFields.map { it.copy(projectId = savedId) })
-                        }
-                        onSaved(savedId)
+                if (name.isBlank()) {
+                    viewModel.showMessage("Dê um nome ao projeto antes de salvar.")
+                    return@FloatingActionButton
+                }
+                val base = existing ?: ProjectEntity(name = name.trim(), language = defaultProjectLanguage)
+                viewModel.saveProject(
+                    base.copy(
+                        name = name.trim(),
+                        description = description,
+                        institution = institution,
+                        principalInvestigator = pi,
+                        defaultDatum = form["datum"].ifBlank { "SIRGAS 2000" },
+                        coordinateFormat = form["coordFormat"].ifBlank { "DD" },
+                        photoQuality = form["photoQuality"].ifBlank { "medium" },
+                        audioFormat = form["audioFormat"].ifBlank { "wav" },
+                        enableFauna = enableFauna,
+                        enableBotany = enableBotany,
+                        enableFungi = enableFungi,
+                        license = form["license"],
+                        mediaBaseUrl = mediaBaseUrl.trim(),
+                        csvStyle = form["csvStyle"].ifBlank { "br" }
+                    )
+                ) { savedId ->
+                    if (projectId == null) {
+                        viewModel.saveFieldConfiguration(savedId, draftFields.map { it.copy(projectId = savedId) })
                     }
+                    form.dirty = false
+                    onSaved(savedId)
                 }
             }) { Icon(Icons.Default.Save, ui("Salvar")) }
         }
     ) { padding ->
-        Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(
+            Modifier.padding(padding).verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 104.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             TextInput("Nome do projeto", name) { name = it }
             TextInput("Descrição", description, minLines = 3) { description = it }
             TextInput("Instituição", institution) { institution = it }
-            TextInput("Responsáveis", pi) { pi = it }
-            ChipRow("Datum padrão", listOf("SIRGAS 2000" to "SIRGAS 2000", "WGS84" to "WGS84"), datum) { datum = it }
-            ChipRow("Formato de coordenadas", listOf("DD" to "Graus Decimais", "UTM" to "UTM", "DMS" to "DMS", "DMM" to "DMM"), coordFormat) { coordFormat = it }
-            ChipRow("Qualidade da foto", listOf("low" to "Baixa", "medium" to "Media", "high" to "Alta"), photoQuality) { photoQuality = it }
-            ChipRow("Formato do áudio", listOf("wav" to "WAV", "mp3" to "MP3"), audioFormat) { audioFormat = it }
+            TextInput("Responsáveis", pi, help = "Nome de quem responde pelos dados. Vai como autor e contato no eml.xml do Darwin Core Archive.") { pi = it }
+            ChipRow("Datum padrão", listOf("SIRGAS 2000" to "SIRGAS 2000", "WGS84" to "WGS84"), form["datum"]) { form["datum"] = it }
+            ChipRow("Formato de coordenadas", listOf("DD" to "Graus Decimais", "UTM" to "UTM", "DMS" to "DMS", "DMM" to "DMM"), form["coordFormat"]) { form["coordFormat"] = it }
+            ChipRow("Qualidade da foto", listOf("low" to "Baixa", "medium" to "Media", "high" to "Alta"), form["photoQuality"]) { form["photoQuality"] = it }
+            ChipRow("Formato do áudio", listOf("wav" to "WAV", "mp3" to "MP3"), form["audioFormat"]) { form["audioFormat"] = it }
+            Text(ui("Publicação dos dados"), style = MaterialTheme.typography.titleMedium)
+            ChipRow(
+                "Licença dos dados",
+                listOf("" to "Definir depois", "CC-BY-4.0" to "CC BY 4.0", "CC0-1.0" to "CC0", "CC-BY-NC-4.0" to "CC BY-NC 4.0"),
+                form["license"]
+            ) { form["license"] = it }
+            Text(
+                ui("O GBIF e o SiBBr só publicam com CC0, CC BY ou CC BY-NC. CC BY 4.0 permite qualquer uso, desde que citem a fonte."),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            TextInput(
+                "URL pública das mídias (opcional)",
+                mediaBaseUrl,
+                keyboardType = KeyboardType.Uri,
+                autoCorrect = false,
+                help = "Endereço onde as fotos e áudios exportados ficarão publicados (Zenodo, site do laboratório). Sem ele, o Darwin Core Archive sai sem a extensão de mídia, porque o padrão exige link público."
+            ) { mediaBaseUrl = it }
+            ChipRow(
+                "Planilha CSV",
+                listOf("br" to "Excel Brasil (; e vírgula)", "intl" to "Internacional (, e ponto)"),
+                form["csvStyle"]
+            ) { form["csvStyle"] = it }
             Text(ui("Módulos do projeto"), style = MaterialTheme.typography.titleMedium)
             Text(ui("Escolha os grupos que este projeto pode registrar. Na ocorrência, o app mostra primeiro o grupo e depois apenas o questionário específico."), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            ProjectModuleFieldCard("Fauna", ui("Animais observados, capturados, ouvidos, vestígios e armadilhas fotográficas."), enableFauna, fields, openFieldGroup == "Fauna", onToggle = { enableFauna = it }, onOpen = { openFieldGroup = if (openFieldGroup == "Fauna") null else "Fauna" }, onFieldChange = ::updateProjectField)
-            ProjectModuleFieldCard("Botanica", ui("Flora, partes de plantas, flor, fruto, caule, folha e dados botânicos."), enableBotany, fields, openFieldGroup == "Botanica", onToggle = { enableBotany = it }, onOpen = { openFieldGroup = if (openFieldGroup == "Botanica") null else "Botanica" }, onFieldChange = ::updateProjectField)
-            ProjectModuleFieldCard("Fungos", ui("Funga, substrato, corpo de frutificação, associações e observações micológicas."), enableFungi, fields, openFieldGroup == "Fungos", onToggle = { enableFungi = it }, onOpen = { openFieldGroup = if (openFieldGroup == "Fungos") null else "Fungos" }, onFieldChange = ::updateProjectField)
+            ProjectModuleFieldCard("Fauna", ui("Animais observados, capturados, ouvidos, vestígios e armadilhas fotográficas."), enableFauna, fields, openFieldGroup == "Fauna", onToggle = { form.setBool("enableFauna", it) }, onOpen = { openFieldGroup = if (openFieldGroup == "Fauna") null else "Fauna" }, onFieldChange = ::updateProjectField)
+            ProjectModuleFieldCard("Botanica", ui("Flora, partes de plantas, flor, fruto, caule, folha e dados botânicos."), enableBotany, fields, openFieldGroup == "Botanica", onToggle = { form.setBool("enableBotany", it) }, onOpen = { openFieldGroup = if (openFieldGroup == "Botanica") null else "Botanica" }, onFieldChange = ::updateProjectField)
+            ProjectModuleFieldCard("Fungos", ui("Funga, substrato, corpo de frutificação, associações e observações micológicas."), enableFungi, fields, openFieldGroup == "Fungos", onToggle = { form.setBool("enableFungi", it) }, onOpen = { openFieldGroup = if (openFieldGroup == "Fungos") null else "Fungos" }, onFieldChange = ::updateProjectField)
         }
     }
+}
+
+/**
+ * Voltar com alteracoes nao salvas pergunta antes de descartar. Vale para o
+ * botao de voltar do aparelho e para a seta da barra superior.
+ */
+@Composable
+private fun rememberGuardedBack(dirty: Boolean, onDiscard: () -> Unit = {}, onBack: () -> Unit): () -> Unit {
+    var asking by remember { mutableStateOf(false) }
+    if (asking) {
+        AlertDialog(
+            onDismissRequest = { asking = false },
+            icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text(ui("Descartar alterações?")) },
+            text = { Text(ui("O que foi preenchido nesta tela ainda não foi salvo.")) },
+            confirmButton = {
+                TextButton(onClick = {
+                    asking = false
+                    onDiscard()
+                    onBack()
+                }) { Text(ui("Descartar")) }
+            },
+            dismissButton = {
+                Button(onClick = { asking = false }) { Text(ui("Continuar editando")) }
+            }
+        )
+    }
+    BackHandler(enabled = dirty) { asking = true }
+    return { if (dirty) asking = true else onBack() }
 }
 
 @Composable
@@ -881,19 +986,27 @@ private fun FieldConfigScreen(viewModel: AppViewModel, projectId: Long, modifier
             // "Identificação"), que apareciam como duas secoes identicas.
             // Normalizar aqui resolve sem migrar groupName no banco, o que
             // quebraria o vinculo dos cards de modulo e do formType gravado.
-            fields.groupBy { fieldGroupDisplayName(it.groupName) }.forEach { (group, groupFields) ->
+            fields.groupBy { fieldGroupDisplayName(it.groupName) }
+                .toList()
+                .sortedBy { (group, _) -> fieldGroupOrder.indexOf(group).let { if (it < 0) Int.MAX_VALUE else it } }
+                .forEach { (group, groupFields) ->
                 item { Text(ui(group), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp)) }
                 items(groupFields.sortedBy { it.displayOrder }) { field ->
                     Card {
-                        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(fieldDisplayLabel(field), style = MaterialTheme.typography.bodyLarge)
-                                Text("${field.labelEn} -> ${field.dwcTerm}", style = MaterialTheme.typography.labelMedium)
+                        Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                            Text(fieldDisplayLabel(field), style = MaterialTheme.typography.bodyLarge)
+                            Text("${field.labelEn} -> ${field.dwcTerm}", style = MaterialTheme.typography.labelMedium)
+                            // Dois interruptores com rotulo proprio: antes o segundo
+                            // ("ativo") nao tinha nome e parecia repeticao do primeiro.
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                                Text(ui("Ativo"), style = MaterialTheme.typography.labelLarge)
+                                Spacer(Modifier.width(6.dp))
+                                Switch(checked = field.enabled, onCheckedChange = { viewModel.updateField(field.copy(enabled = it, required = field.required && it)) })
+                                Spacer(Modifier.width(16.dp))
+                                Text(ui("Obrigatório"), style = MaterialTheme.typography.labelLarge)
+                                Spacer(Modifier.width(6.dp))
+                                Switch(checked = field.required, onCheckedChange = { viewModel.updateField(field.copy(required = it, enabled = field.enabled || it)) })
                             }
-                            Text(ui("Obrig."))
-                            Switch(checked = field.required, onCheckedChange = { viewModel.updateField(field.copy(required = it, enabled = field.enabled || it)) })
-                            Spacer(Modifier.width(8.dp))
-                            Switch(checked = field.enabled, onCheckedChange = { viewModel.updateField(field.copy(enabled = it, required = field.required && it)) })
                         }
                     }
                 }
@@ -914,86 +1027,129 @@ private fun SessionEditScreen(
 ) {
     val project by viewModel.observeProject(projectId).collectAsState(initial = null)
     val existing by (sessionId?.let { viewModel.observeSession(it) } ?: kotlinx.coroutines.flow.flowOf(null)).collectAsState(initial = null)
-    var name by remember(existing?.id) { mutableStateOf(existing?.name.orEmpty()) }
-    var eventId by remember(existing?.id) { mutableStateOf(existing?.eventId ?: AppViewModel.newEventId()) }
-    var date by remember(existing?.id) { mutableStateOf(existing?.eventDate ?: LocalDate.now().toString()) }
-    var startTime by remember(existing?.id) { mutableStateOf(existing?.startTime ?: LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))) }
-    var endTime by remember(existing?.id) { mutableStateOf(existing?.endTime.orEmpty()) }
-    var locality by remember(existing?.id) { mutableStateOf(existing?.locality.orEmpty()) }
-    var municipality by remember(existing?.id) { mutableStateOf(existing?.municipality.orEmpty()) }
-    var stateProvince by remember(existing?.id) { mutableStateOf(existing?.stateProvince.orEmpty()) }
-    var country by remember(existing?.id) { mutableStateOf(existing?.country?.ifBlank { "Brasil" } ?: "Brasil") }
-    var habitat by remember(existing?.id) { mutableStateOf(existing?.habitat.orEmpty()) }
-    var environmentType by remember(existing?.id) { mutableStateOf(existing?.environmentType.orEmpty()) }
-    var protocol by remember(existing?.id) { mutableStateOf(existing?.samplingProtocol.orEmpty()) }
-    var effort by remember(existing?.id) { mutableStateOf(existing?.samplingEffort.orEmpty()) }
-    var recordedBy by remember(existing?.id) { mutableStateOf(existing?.recordedBy.orEmpty()) }
-    var fieldTeam by remember(existing?.id) { mutableStateOf(existing?.fieldTeam?.ifBlank { project?.principalInvestigator.orEmpty() } ?: project?.principalInvestigator.orEmpty()) }
-    var trackEnabled by remember(existing?.id) { mutableStateOf(existing?.gpsTrackEnabled ?: false) }
-    var lat by remember(existing?.id) { mutableStateOf(existing?.latitude?.toString().orEmpty()) }
-    var lon by remember(existing?.id) { mutableStateOf(existing?.longitude?.toString().orEmpty()) }
-    var alt by remember(existing?.id) { mutableStateOf(existing?.altitude?.toString().orEmpty()) }
-    var accuracy by remember(existing?.id) { mutableStateOf(existing?.coordinateUncertaintyInMeters?.toString().orEmpty()) }
-    var notes by remember(existing?.id) { mutableStateOf(existing?.notes.orEmpty()) }
-
-    LaunchedEffect(sessionId) {
-        if (sessionId == null && lat.isBlank() && lon.isBlank()) {
-            requestLocation { location ->
-                location?.let {
-                    lat = it.latitude.toString()
-                    lon = it.longitude.toString()
-                    alt = it.altitude?.toString().orEmpty()
-                    accuracy = it.accuracyMeters?.toString().orEmpty()
-                    if (municipality.isBlank()) municipality = it.municipality
-                    if (stateProvince.isBlank()) stateProvince = it.stateProvince
-                    if (country.isBlank() || country == "Brasil") country = it.country.ifBlank { country }
-                }
-            }
+    val projectSessions by viewModel.observeSessions(projectId).collectAsState(initial = emptyList())
+    val form = rememberFormState("session:$projectId:${sessionId ?: "new"}")
+    LaunchedEffect(existing, project, sessionId) {
+        if (form.initialized) return@LaunchedEffect
+        if (sessionId == null) {
+            val currentProject = project ?: return@LaunchedEffect
+            form.load(
+                mapOf(
+                    "eventId" to AppViewModel.newEventId(),
+                    "date" to LocalDate.now().toString(),
+                    "startTime" to LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm")),
+                    "country" to "Brasil",
+                    "fieldTeam" to currentProject.principalInvestigator
+                )
+            )
+            // Expedicao nova: captura a posicao inicial uma vez.
+            requestLocation { location -> location?.let { applyLocation(form, it) } }
+        } else {
+            val session = existing ?: return@LaunchedEffect
+            form.load(
+                mapOf(
+                    "name" to session.name, "eventId" to session.eventId, "date" to session.eventDate,
+                    "startTime" to session.startTime, "endTime" to session.endTime, "locality" to session.locality,
+                    "municipality" to session.municipality, "stateProvince" to session.stateProvince,
+                    "country" to session.country, "habitat" to session.habitat, "environmentType" to session.environmentType,
+                    "protocol" to session.samplingProtocol, "effort" to session.samplingEffort,
+                    "recordedBy" to session.recordedBy, "fieldTeam" to session.fieldTeam,
+                    "trackEnabled" to session.gpsTrackEnabled.toString(),
+                    "lat" to (session.latitude?.toString() ?: ""), "lon" to (session.longitude?.toString() ?: ""),
+                    "alt" to (session.altitude?.toString() ?: ""), "accuracy" to (session.coordinateUncertaintyInMeters?.toString() ?: ""),
+                    "notes" to session.notes, "parentEventId" to session.parentEventId,
+                    "sampleSizeValue" to (session.sampleSizeValue?.let { formatPlain(it) } ?: ""),
+                    "sampleSizeUnit" to session.sampleSizeUnit, "verbatimEventDate" to session.verbatimEventDate
+                )
+            )
         }
     }
+    var name by form.field("name")
+    var eventId by form.field("eventId")
+    var date by form.field("date")
+    var startTime by form.field("startTime")
+    var endTime by form.field("endTime")
+    var locality by form.field("locality")
+    var municipality by form.field("municipality")
+    var stateProvince by form.field("stateProvince")
+    var country by form.field("country")
+    var habitat by form.field("habitat")
+    var environmentType by form.field("environmentType")
+    var protocol by form.field("protocol")
+    var effort by form.field("effort")
+    var recordedBy by form.field("recordedBy")
+    var fieldTeam by form.field("fieldTeam")
+    var lat by form.field("lat")
+    var lon by form.field("lon")
+    var alt by form.field("alt")
+    var accuracy by form.field("accuracy")
+    var notes by form.field("notes")
+    var parentEventId by form.field("parentEventId")
+    var sampleSizeValue by form.field("sampleSizeValue")
+    var sampleSizeUnit by form.field("sampleSizeUnit")
+    var verbatimEventDate by form.field("verbatimEventDate")
+    val trackEnabled = form.bool("trackEnabled", false)
+    var showSampling by rememberSaveable { mutableStateOf(false) }
+
+    val guardedBack = rememberGuardedBack(form.dirty, onBack = onBack)
 
     Scaffold(
         modifier = modifier,
-        topBar = { OikosTopBar(if (sessionId == null) "Nova expedição" else "Editar expedição", onBack) },
+        topBar = { OikosTopBar(if (sessionId == null) "Nova expedição" else "Editar expedição", guardedBack) },
         floatingActionButton = {
             FloatingActionButton(onClick = {
-                viewModel.saveSession(
-                    SessionEntity(
-                        id = existing?.id ?: 0L,
-                        projectId = projectId,
-                        eventId = eventId,
-                        name = name.ifBlank { "Expedição $date" },
-                        eventDate = date,
-                        startTime = startTime,
-                        endTime = endTime,
-                        locality = locality,
-                        municipality = municipality,
-                        stateProvince = stateProvince,
-                        country = country,
-                        habitat = habitat,
-                        environmentType = environmentType,
-                        samplingProtocol = protocol,
-                        samplingEffort = effort,
-                        recordedBy = recordedBy,
-                        fieldTeam = fieldTeam,
-                        gpsTrackEnabled = trackEnabled,
-                        latitude = lat.toDoubleOrNull(),
-                        longitude = lon.toDoubleOrNull(),
-                        altitude = alt.toDoubleOrNull(),
-                        coordinateUncertaintyInMeters = accuracy.toDoubleOrNull(),
-                        geodeticDatum = project?.defaultDatum ?: existing?.geodeticDatum ?: "SIRGAS 2000",
-                        notes = notes,
-                        createdAt = existing?.createdAt ?: System.currentTimeMillis()
-                    ),
-                    onSaved
+                val sizeValue = sampleSizeValue.replace(',', '.').toDoubleOrNull()
+                if (sampleSizeValue.isNotBlank() && sizeValue == null) {
+                    viewModel.showMessage("Tamanho da unidade amostral precisa ser um número.")
+                    return@FloatingActionButton
+                }
+                // Edicao parte do registro salvo: campos que esta tela nao mostra
+                // sao preservados. Antes o registro era recriado do zero.
+                val base = existing ?: SessionEntity(projectId = projectId, eventId = eventId, name = "")
+                val session = base.copy(
+                    eventId = eventId.trim(),
+                    name = name.trim().ifBlank { "Expedição $date" },
+                    eventDate = date,
+                    startTime = startTime,
+                    endTime = endTime,
+                    locality = locality,
+                    municipality = municipality,
+                    stateProvince = stateProvince,
+                    country = country,
+                    habitat = habitat,
+                    environmentType = environmentType,
+                    samplingProtocol = protocol,
+                    samplingEffort = effort,
+                    parentEventId = parentEventId,
+                    sampleSizeValue = sizeValue,
+                    sampleSizeUnit = sampleSizeUnit,
+                    verbatimEventDate = verbatimEventDate,
+                    recordedBy = recordedBy,
+                    fieldTeam = fieldTeam,
+                    gpsTrackEnabled = trackEnabled,
+                    latitude = lat.replace(',', '.').toDoubleOrNull(),
+                    longitude = lon.replace(',', '.').toDoubleOrNull(),
+                    altitude = alt.replace(',', '.').toDoubleOrNull(),
+                    coordinateUncertaintyInMeters = accuracy.replace(',', '.').toDoubleOrNull(),
+                    // O datum de uma expedicao existente nao muda se o padrao do
+                    // projeto mudar depois: a coordenada foi tomada naquele datum.
+                    geodeticDatum = existing?.geodeticDatum ?: project?.defaultDatum ?: "SIRGAS 2000",
+                    notes = notes
                 )
+                viewModel.saveSession(session) {
+                    form.dirty = false
+                    onSaved(it)
+                }
             }) { Icon(Icons.Default.Save, ui("Salvar")) }
         }
     ) { padding ->
-        Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(
+            Modifier.padding(padding).verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 104.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             HelpCard("Expedição", "Expedição é uma saída de campo, dia de coleta ou campanha. Internamente ela continua como Darwin Core Event.")
             TextInput("Nome da expedição", name) { name = it }
-            TextInput("eventID", eventId) { eventId = it }
+            TextInput("eventID", eventId, autoCorrect = false) { eventId = it }
             DateInput("Data", date) { date = it }
             TimeInput("Hora de início", startTime) { startTime = it }
             TimeInput("Hora de término", endTime) { endTime = it }
@@ -1007,30 +1163,63 @@ private fun SessionEditScreen(
             TextInput("Esforço amostral", effort, help = "Tempo, distância ou método usado na coleta. Exemplo: 2 horas de busca ativa.") { effort = it }
             TextInput("Equipe de campo", fieldTeam) { fieldTeam = it }
             TextInput("Coletor principal", recordedBy) { recordedBy = it }
+            OutlinedButton(onClick = { showSampling = !showSampling }) {
+                Text(if (showSampling) ui("Ocultar amostragem quantitativa") else ui("Amostragem quantitativa (parcela, transecto)"))
+            }
+            AnimatedVisibility(visible = showSampling || parentEventId.isNotBlank() || sampleSizeValue.isNotBlank()) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    HelpCard(
+                        "Unidade amostral",
+                        "Para inventário quantitativo: indique a expedição de que esta faz parte (campanha > dia > parcela) e o tamanho da unidade amostral. Sem isso não se calcula densidade nem abundância relativa a partir da exportação."
+                    )
+                    val parents = projectSessions.filter { it.id != sessionId }
+                    ChipRow(
+                        "Faz parte de (parentEventID)",
+                        listOf("" to "Nenhuma") + parents.map { it.eventId to it.name.ifBlank { it.eventId } },
+                        parentEventId
+                    ) { parentEventId = it }
+                    TextInput("Tamanho da unidade amostral (sampleSizeValue)", sampleSizeValue, KeyboardType.Decimal) { sampleSizeValue = it }
+                    DwcVocabularyInput(
+                        label = ui("Unidade (sampleSizeUnit)"),
+                        value = sampleSizeUnit,
+                        options = DwcVocabulary.sampleSizeUnit
+                    ) { sampleSizeUnit = it }
+                    TextInput(
+                        "Data como anotada (verbatimEventDate)",
+                        verbatimEventDate,
+                        help = "Exatamente como está na caderneta ou etiqueta, por exemplo \"3-5.iii.2026\"."
+                    ) { verbatimEventDate = it }
+                }
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(ui("Registrar trilha da expedição"), style = MaterialTheme.typography.titleMedium)
                     Text(ui("Salva o percurso geral da expedição para exportar como LineString."), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Switch(checked = trackEnabled, onCheckedChange = { trackEnabled = it })
+                Switch(checked = trackEnabled, onCheckedChange = { form.setBool("trackEnabled", it) })
             }
             LocationFields(project?.coordinateFormat ?: "DD", lat, lon, alt, accuracy, { lat = it }, { lon = it }, { alt = it }, { accuracy = it }) {
-                requestLocation { location ->
-                    location?.let {
-                        lat = it.latitude.toString()
-                        lon = it.longitude.toString()
-                        alt = it.altitude?.toString().orEmpty()
-                        accuracy = it.accuracyMeters?.toString().orEmpty()
-                        if (municipality.isBlank()) municipality = it.municipality
-                        if (stateProvince.isBlank()) stateProvince = it.stateProvince
-                        if (country.isBlank() || country == "Brasil") country = it.country.ifBlank { country }
-                    }
-                }
+                requestLocation { location -> location?.let { applyLocation(form, it) } }
             }
             TextInput("Observações gerais", notes, minLines = 3) { notes = it }
         }
     }
 }
+
+/** Preenche coordenada e, se a geocodificacao estiver ligada, municipio e estado. */
+private fun applyLocation(form: FormState, location: CapturedLocation) {
+    form["lat"] = location.latitude.toString()
+    form["lon"] = location.longitude.toString()
+    form["alt"] = location.altitude?.let { formatPlain(it) }.orEmpty()
+    form["accuracy"] = location.accuracyMeters?.let { formatPlain(it) }.orEmpty()
+    if (form["municipality"].isBlank() && location.municipality.isNotBlank()) form["municipality"] = location.municipality
+    if (form["stateProvince"].isBlank() && location.stateProvince.isNotBlank()) form["stateProvince"] = location.stateProvince
+    if ((form["country"].isBlank() || form["country"] == "Brasil") && location.country.isNotBlank()) form["country"] = location.country
+}
+
+/** 12.0 -> "12", 12.5 -> "12.5": sem ".0" sobrando nos campos. */
+private fun formatPlain(value: Double): String =
+    if (value % 1.0 == 0.0) value.toLong().toString() else value.toString()
 
 @Composable
 private fun SessionDetailScreen(
@@ -1065,8 +1254,16 @@ private fun SessionDetailScreen(
             viewModel.importTrack(currentSession, imported)
         }
     }
-    LaunchedEffect(sessionId) {
-        requestLocation { location -> currentLocation = location }
+    // Posicao ao vivo para o mapa, so enquanto a tela esta visivel. Antes eram
+    // capturas completas (com consulta de endereco pela internet) ao abrir a
+    // tela e a cada 3 s com o mapa grande aberto. locationToken reinicia a
+    // coleta depois que o usuario concede a permissao.
+    var locationToken by remember { mutableIntStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(sessionId, locationToken, lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            viewModel.locationUpdates().collect { currentLocation = it }
+        }
     }
     if (deleteSession) {
         val currentSession = session
@@ -1131,7 +1328,10 @@ private fun SessionDetailScreen(
                     currentLocation = currentLocation,
                     isActive = activeTrack != null,
                     onLocate = {
-                        requestLocation { location -> currentLocation = location }
+                        requestLocation { location ->
+                            if (location != null) currentLocation = location
+                            locationToken++
+                        }
                     },
                     onStart = {
                         session?.let { currentSession ->
@@ -1193,7 +1393,7 @@ private fun SessionDetailScreen(
                         Row(verticalAlignment = Alignment.Top) {
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text(occurrence.scientificName.ifBlank { "Ocorrência sem nome científico" }, style = MaterialTheme.typography.titleMedium)
-                                Text(listOf(occurrence.vernacularName, occurrence.recordedBy, occurrence.occurrenceStatus).filter { it.isNotBlank() }.joinToString(" - "))
+                                Text(listOf(occurrence.vernacularName, occurrence.recordedBy, dwcValueLabel(occurrence.occurrenceStatus)).filter { it.isNotBlank() }.joinToString(" - "))
                             }
                             IconButton(onClick = { occurrenceToDelete = occurrence }) {
                                 Icon(Icons.Default.Delete, ui("Apagar ocorrência"))
@@ -1231,15 +1431,6 @@ private fun TrackPanel(
     var recenterToken by remember { mutableStateOf(0) }
     var showTrackDisclosure by remember { mutableStateOf(false) }
     val bearing = rememberCompassBearing()
-    LaunchedEffect(Unit) {
-        onLocate()
-    }
-    LaunchedEffect(showLargeMap) {
-        while (showLargeMap) {
-            onLocate()
-            delay(3_000)
-        }
-    }
     if (showLargeMap) {
         TrackMapDialog(
             points = points,
@@ -1496,9 +1687,11 @@ private fun TrackMapDialog(
                     currentLocation = currentLocation,
                     bearing = bearing,
                     recenterToken = recenterToken,
+                    // Altura proporcional a tela: os 520 dp fixos empurravam os
+                    // botoes para fora em aparelhos de 320 x 569 dp.
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(520.dp)
+                        .height((LocalConfiguration.current.screenHeightDp - 250).coerceIn(220, 520).dp)
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
                     Button(onClick = {
@@ -1603,22 +1796,6 @@ private fun oikosArrowMarkerDrawable(context: Context): BitmapDrawable {
     return BitmapDrawable(context.resources, bitmap)
 }
 
-private fun googleMapsUri(points: List<GpsTrackPointEntity>): Uri? {
-    val last = points.lastOrNull() ?: return null
-    val first = points.firstOrNull()
-    if (first == null || points.size < 2) {
-        return Uri.parse("geo:${last.latitude},${last.longitude}?q=${last.latitude},${last.longitude}(Oikos+FieldBook)")
-    }
-    val waypoints = points.drop(1).dropLast(1)
-        .filterIndexed { index, _ -> index % ((points.size / 8).coerceAtLeast(1)) == 0 }
-        .take(8)
-        .joinToString("|") { "${it.latitude},${it.longitude}" }
-    val base = "https://www.google.com/maps/dir/?api=1&travelmode=walking" +
-        "&origin=${first.latitude},${first.longitude}" +
-        "&destination=${last.latitude},${last.longitude}"
-    return Uri.parse(if (waypoints.isBlank()) base else "$base&waypoints=$waypoints")
-}
-
 private fun parseImportedTrack(context: Context, uri: Uri): List<ImportedTrackPoint> {
     val text = runCatching {
         context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }.orEmpty()
@@ -1635,11 +1812,17 @@ private fun parseImportedTrack(context: Context, uri: Uri): List<ImportedTrackPo
 private fun parseGpxTrack(text: String): List<ImportedTrackPoint> {
     val pointRegex = Regex("""<(?:trkpt|rtept|wpt)\b[^>]*\blat=["']([-0-9.]+)["'][^>]*\blon=["']([-0-9.]+)["'][^>]*>(.*?)</(?:trkpt|rtept|wpt)>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
     val elevationRegex = Regex("""<ele>([-0-9.]+)</ele>""", RegexOption.IGNORE_CASE)
-    return pointRegex.findAll(text).mapNotNull { match ->
+    val timeRegex = Regex("""<time>([^<]+)</time>""", RegexOption.IGNORE_CASE)
+    // O horario de cada ponto era ignorado: todos ganhavam o instante da
+    // importacao, e a duracao da trilha importada saia zero.
+    val importedAt = System.currentTimeMillis()
+    return pointRegex.findAll(text).mapIndexedNotNull { index, match ->
         val lat = match.groupValues[1].toDoubleOrNull()
         val lon = match.groupValues[2].toDoubleOrNull()
         val ele = elevationRegex.find(match.groupValues[3])?.groupValues?.getOrNull(1)?.toDoubleOrNull()
-        if (lat != null && lon != null) ImportedTrackPoint(lat, lon, altitude = ele) else null
+        val time = timeRegex.find(match.groupValues[3])?.groupValues?.getOrNull(1)
+            ?.let { runCatching { java.time.Instant.parse(it.trim()).toEpochMilli() }.getOrNull() }
+        if (lat != null && lon != null) ImportedTrackPoint(lat, lon, altitude = ele, timestamp = time ?: (importedAt + index)) else null
     }.toList()
 }
 
@@ -1713,7 +1896,17 @@ private fun hasPermission(context: Context, permission: String): Boolean =
     ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
 
 private fun formatClock(timestamp: Long): String =
-    SimpleDateFormat("HH:mm:ss", Locale("pt", "BR")).format(Date(timestamp))
+    SimpleDateFormat("HH:mm:ss", Locale.forLanguageTag("pt-BR")).format(Date(timestamp))
+
+/** Acesso aos campos dinamicos do formulario, guardados com o prefixo "dyn:". */
+private class DynamicValues(private val form: FormState) {
+    operator fun get(key: String): String = form["dyn:$key"]
+    operator fun set(key: String, value: String) {
+        form["dyn:$key"] = value
+    }
+    fun asMap(): Map<String, String> =
+        form.values.filterKeys { it.startsWith("dyn:") }.mapKeys { it.key.removePrefix("dyn:") }
+}
 
 @Composable
 private fun OccurrenceEditScreen(
@@ -1725,53 +1918,128 @@ private fun OccurrenceEditScreen(
     modifier: Modifier,
     requestLocation: ((CapturedLocation?) -> Unit) -> Unit,
     onBack: () -> Unit,
-    onDeleted: () -> Unit,
-    onMedia: (Long) -> Unit
+    onDeleted: () -> Unit
 ) {
     val project by viewModel.observeProject(projectId).collectAsState(initial = null)
     val session by viewModel.observeSession(sessionId).collectAsState(initial = null)
-    val occurrence by (occurrenceId?.let { viewModel.observeOccurrence(it) } ?: kotlinx.coroutines.flow.flowOf(null)).collectAsState(initial = null)
     val existing by (occurrenceId?.let { viewModel.observeOccurrence(it) } ?: kotlinx.coroutines.flow.flowOf(null)).collectAsState(initial = null)
     val sessionOccurrences by viewModel.observeOccurrences(sessionId).collectAsState(initial = emptyList())
     val fields by viewModel.observeFields(projectId).collectAsState(initial = emptyList())
     val enabledFields = fields.filter { it.enabled }
-    val dynamicValues = remember(existing?.id, fields.size) { mutableStateMapOf<String, String>().also { it.putAll(parseFlatJsonMap(existing?.dynamicFieldsJson ?: "{}")) } }
-    val pendingMedia = remember(existing?.id) { mutableStateListOf<MediaEntity>() }
     val moduleOptions = project?.enabledOccurrenceModules().orEmpty().ifEmpty { listOf("Fauna") }
 
-    var occurrenceID by remember(existing?.id) { mutableStateOf(existing?.occurrenceId.orEmpty()) }
-    var formType by remember(existing?.id) { mutableStateOf(existing?.formType?.ifBlank { moduleOptions.first() } ?: moduleOptions.first()) }
-    var occurrenceType by remember(existing?.id) { mutableStateOf(existing?.occurrenceType?.ifBlank { occurrenceTypesFor(formType).first() } ?: occurrenceTypesFor(formType).first()) }
-    var occurrenceDate by remember(existing?.id, session?.eventDate) {
-        val savedDate = dynamicValues["eventDate"].orEmpty().ifBlank { session?.eventDate ?: LocalDate.now().toString() }
-        mutableStateOf(normalizeDateInput(savedDate) ?: savedDate)
+    // Rascunho: sobrevive a rotacao e ao Android fechar o app em segundo plano
+    // (comum com a camera aberta). Antes, girar a tela apagava o que tinha sido
+    // digitado e as fotos ainda nao salvas ficavam orfas no armazenamento.
+    val draftKey = "occ:$sessionId:${occurrenceId ?: "new"}"
+    val form = rememberFormState(draftKey)
+    val dynamicValues = remember(form) { DynamicValues(form) }
+
+    LaunchedEffect(project, session, existing, occurrenceId) {
+        if (form.initialized) return@LaunchedEffect
+        // O identificador so e gerado com projeto e expedicao carregados; antes
+        // saia "OIKOS-..." porque era gerado enquanto o projeto ainda era nulo.
+        val currentProject = project ?: return@LaunchedEffect
+        val currentSession = session ?: return@LaunchedEffect
+        if (occurrenceId == null) {
+            val module = moduleOptions.first()
+            form.load(
+                mapOf(
+                    "occurrenceID" to semanticOccurrenceId(currentProject, currentSession, sessionOccurrences.size + 1),
+                    "formType" to module,
+                    "occurrenceType" to occurrenceTypesFor(module).first(),
+                    "date" to (normalizeDateInput(currentSession.eventDate) ?: LocalDate.now().toString()),
+                    "time" to LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm")),
+                    "basis" to "HumanObservation",
+                    "status" to "present"
+                )
+            )
+        } else {
+            val occurrence = existing ?: return@LaunchedEffect
+            val dynamic = parseFlatJsonMap(occurrence.dynamicFieldsJson)
+            val savedDate = dynamic["eventDate"].orEmpty().ifBlank { currentSession.eventDate }
+            form.load(
+                mapOf(
+                    "occurrenceID" to occurrence.occurrenceId,
+                    "formType" to occurrence.formType.ifBlank { moduleOptions.first() },
+                    "occurrenceType" to occurrence.occurrenceType.ifBlank { occurrenceTypesFor(occurrence.formType).first() },
+                    "date" to (normalizeDateInput(savedDate) ?: savedDate),
+                    "time" to dynamic["eventTime"].orEmpty(),
+                    "recordNumber" to occurrence.recordNumber,
+                    "scientificName" to occurrence.scientificName,
+                    "vernacularName" to occurrence.vernacularName,
+                    "basis" to occurrence.basisOfRecord,
+                    "status" to occurrence.occurrenceStatus,
+                    "count" to (occurrence.individualCount?.toString() ?: ""),
+                    "sex" to occurrence.sex,
+                    "lifeStage" to occurrence.lifeStage,
+                    "behavior" to occurrence.behavior,
+                    "reproductive" to occurrence.reproductiveCondition,
+                    "recordedBy" to occurrence.recordedBy,
+                    "identifiedBy" to occurrence.identifiedBy,
+                    "dateIdentified" to (normalizeDateInput(occurrence.dateIdentified) ?: occurrence.dateIdentified),
+                    "lat" to (occurrence.latitude?.toString() ?: ""),
+                    "lon" to (occurrence.longitude?.toString() ?: ""),
+                    "alt" to (occurrence.altitude?.let { formatPlain(it) } ?: ""),
+                    "accuracy" to (occurrence.coordinateUncertaintyInMeters?.let { formatPlain(it) } ?: ""),
+                    "remarks" to occurrence.occurrenceRemarks,
+                    "fieldNotes" to occurrence.fieldNotes
+                ) + dynamic.filterKeys { it != "eventDate" && it != "eventTime" }.mapKeys { "dyn:${it.key}" }
+            )
+        }
     }
-    var occurrenceTime by remember(existing?.id) {
-        mutableStateOf(dynamicValues["eventTime"].orEmpty().ifBlank { LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm")) })
+
+    // Midias capturadas para este rascunho chegam pelo ViewModel (sobrevivem a
+    // rotacao mesmo se a foto terminar de processar com a tela sendo recriada).
+    val incoming by viewModel.pendingMedia.collectAsState()
+    LaunchedEffect(incoming[draftKey]) {
+        val arrived = viewModel.takePendingMedia(draftKey)
+        if (arrived.isNotEmpty()) {
+            form.pendingMedia = form.pendingMedia + arrived
+            form.dirty = true
+        }
     }
-    var recordNumber by remember(existing?.id) { mutableStateOf(existing?.recordNumber.orEmpty()) }
-    var scientificName by remember(existing?.id) { mutableStateOf(existing?.scientificName.orEmpty()) }
-    var vernacularName by remember(existing?.id) { mutableStateOf(existing?.vernacularName.orEmpty()) }
-    var basis by remember(existing?.id) { mutableStateOf(existing?.basisOfRecord ?: "HumanObservation") }
-    var status by remember(existing?.id) { mutableStateOf(existing?.occurrenceStatus ?: "present") }
-    var count by remember(existing?.id) { mutableStateOf(existing?.individualCount?.toString().orEmpty()) }
-    var sex by remember(existing?.id) { mutableStateOf(existing?.sex.orEmpty()) }
-    var lifeStage by remember(existing?.id) { mutableStateOf(existing?.lifeStage.orEmpty()) }
-    var behavior by remember(existing?.id) { mutableStateOf(existing?.behavior.orEmpty()) }
-    var reproductive by remember(existing?.id) { mutableStateOf(existing?.reproductiveCondition.orEmpty()) }
-    var recordedBy by remember(existing?.id) { mutableStateOf(existing?.recordedBy.orEmpty()) }
-    var identifiedBy by remember(existing?.id) { mutableStateOf(existing?.identifiedBy.orEmpty()) }
-    var dateIdentified by remember(existing?.id) { mutableStateOf(normalizeDateInput(existing?.dateIdentified.orEmpty()) ?: existing?.dateIdentified.orEmpty()) }
-    var lat by remember(existing?.id) { mutableStateOf(existing?.latitude?.toString().orEmpty()) }
-    var lon by remember(existing?.id) { mutableStateOf(existing?.longitude?.toString().orEmpty()) }
-    var alt by remember(existing?.id) { mutableStateOf(existing?.altitude?.toString().orEmpty()) }
-    var accuracy by remember(existing?.id) { mutableStateOf(existing?.coordinateUncertaintyInMeters?.toString().orEmpty()) }
-    var remarks by remember(existing?.id) { mutableStateOf(existing?.occurrenceRemarks.orEmpty()) }
-    var fieldNotes by remember(existing?.id) { mutableStateOf(existing?.fieldNotes.orEmpty()) }
-    var showAdvanced by remember(simpleMode) { mutableStateOf(true) }
+
+    var occurrenceID by form.field("occurrenceID")
+    var formType by form.field("formType")
+    var occurrenceType by form.field("occurrenceType")
+    var occurrenceDate by form.field("date")
+    var occurrenceTime by form.field("time")
+    var recordNumber by form.field("recordNumber")
+    var scientificName by form.field("scientificName")
+    var vernacularName by form.field("vernacularName")
+    var basis by form.field("basis")
+    var status by form.field("status")
+    var count by form.field("count")
+    var sex by form.field("sex")
+    var lifeStage by form.field("lifeStage")
+    var behavior by form.field("behavior")
+    var reproductive by form.field("reproductive")
+    var recordedBy by form.field("recordedBy")
+    var identifiedBy by form.field("identifiedBy")
+    var dateIdentified by form.field("dateIdentified")
+    var lat by form.field("lat")
+    var lon by form.field("lon")
+    var alt by form.field("alt")
+    var accuracy by form.field("accuracy")
+    var remarks by form.field("remarks")
+    var fieldNotes by form.field("fieldNotes")
+    // Modo simples: campos avancados comecam recolhidos (antes o interruptor
+    // existia e nao mudava nada).
+    var showAdvanced by rememberSaveable { mutableStateOf(!simpleMode) }
     var deleteOccurrence by remember { mutableStateOf(false) }
+
+    val guardedBack = rememberGuardedBack(
+        dirty = form.dirty || form.pendingMedia.isNotEmpty(),
+        onDiscard = {
+            viewModel.discardRecording(draftKey)
+            viewModel.discardPendingMedia(form.pendingMedia + viewModel.takePendingMedia(draftKey))
+        },
+        onBack = onBack
+    )
+
     if (deleteOccurrence) {
-        val currentOccurrence = occurrence
+        val currentOccurrence = existing
         ConfirmDeleteDialog(
             title = "Apagar ocorrência?",
             text = "Isso remove este registro e as fotos/áudios vinculados a ele.",
@@ -1788,98 +2056,108 @@ private fun OccurrenceEditScreen(
         viewModel.ensureFieldCatalog(projectId)
     }
 
-    LaunchedEffect(project?.id, session?.id, existing?.id, sessionOccurrences.size) {
-        if (occurrenceId == null && occurrenceID.isBlank()) {
-            occurrenceID = semanticOccurrenceId(project, session, sessionOccurrences.size + 1)
-        }
-    }
-
-    LaunchedEffect(moduleOptions.joinToString("|")) {
-        if (formType !in moduleOptions) {
+    LaunchedEffect(moduleOptions.joinToString("|"), form.initialized) {
+        if (form.initialized && formType !in moduleOptions) {
             formType = moduleOptions.first()
             occurrenceType = occurrenceTypesFor(formType).first()
         }
     }
 
+    val extraFields = enabledFields
+        .filterNot { it.dwcTerm in fixedOccurrenceTerms }
+        .filterNot { it.dwcTerm in advancedOccurrenceTerms }
+        .filterNot { it.dwcTerm in formOwnedTerms }
+    // No modo simples, extras opcionais ficam recolhidos; obrigatorios aparecem sempre.
+    val visibleExtras = if (showAdvanced) extraFields else extraFields.filter { it.required }
+
     Scaffold(
         modifier = modifier,
         topBar = {
-            OikosTopBar(if (occurrenceId == null) "Nova ocorrência" else "Editar ocorrência", onBack) {
-                if (occurrenceId != null) IconButton(onClick = { onMedia(occurrenceId) }) { Icon(Icons.Default.Photo, "Mídias") }
+            OikosTopBar(if (occurrenceId == null) "Nova ocorrência" else "Editar ocorrência", guardedBack) {
                 if (occurrenceId != null) IconButton(onClick = { deleteOccurrence = true }) { Icon(Icons.Default.Delete, ui("Apagar ocorrência")) }
             }
         },
         floatingActionButton = {
             FloatingActionButton(onClick = {
-                dynamicValues["eventDate"] = occurrenceDate
-                dynamicValues["eventTime"] = occurrenceTime
-                val occurrenceToSave =
-                    OccurrenceEntity(
-                        id = existing?.id ?: 0L,
-                        projectId = projectId,
-                        sessionId = sessionId,
-                        occurrenceId = occurrenceID,
-                        occurrenceType = occurrenceType,
-                        formType = formType,
-                        recordNumber = recordNumber,
-                        scientificName = scientificName,
-                        vernacularName = vernacularName,
-                        basisOfRecord = basis,
-                        occurrenceStatus = status,
-                        individualCount = count.toIntOrNull(),
-                        sex = sex,
-                        lifeStage = lifeStage,
-                        behavior = behavior,
-                        reproductiveCondition = reproductive,
-                        recordedBy = recordedBy,
-                        identifiedBy = identifiedBy,
-                        dateIdentified = dateIdentified,
-                        latitude = lat.toDoubleOrNull(),
-                        longitude = lon.toDoubleOrNull(),
-                        altitude = alt.toDoubleOrNull(),
-                        coordinateUncertaintyInMeters = accuracy.toDoubleOrNull(),
-                        geodeticDatum = project?.defaultDatum ?: existing?.geodeticDatum ?: "SIRGAS 2000",
-                        occurrenceRemarks = remarks,
-                        fieldNotes = fieldNotes,
-                        dynamicFieldsJson = flatJson(dynamicValues),
-                        createdAt = existing?.createdAt ?: System.currentTimeMillis()
-                    )
-                // Campos marcados como obrigatorios na configuracao do projeto
-                // bloqueiam o salvamento. Ate a v0.1.7 a lista era calculada e
-                // descartada, e o interruptor "Obrig." nao tinha efeito algum.
+                if (viewModel.recording.value?.target?.draftKey == draftKey) {
+                    viewModel.showMessage("Pare a gravação antes de salvar o registro.")
+                    return@FloatingActionButton
+                }
+                val dynamic = dynamicValues.asMap() + mapOf("eventDate" to occurrenceDate, "eventTime" to occurrenceTime)
+                val base = existing ?: OccurrenceEntity(projectId = projectId, sessionId = sessionId, occurrenceId = occurrenceID)
+                val occurrenceToSave = base.copy(
+                    occurrenceId = occurrenceID.trim(),
+                    occurrenceType = occurrenceType,
+                    formType = formType,
+                    recordNumber = recordNumber.trim(),
+                    scientificName = scientificName.trim(),
+                    vernacularName = vernacularName.trim(),
+                    basisOfRecord = basis,
+                    occurrenceStatus = status,
+                    individualCount = count.trim().toIntOrNull(),
+                    sex = sex,
+                    lifeStage = lifeStage,
+                    behavior = behavior,
+                    reproductiveCondition = reproductive,
+                    recordedBy = recordedBy,
+                    identifiedBy = identifiedBy,
+                    dateIdentified = dateIdentified,
+                    latitude = lat.replace(',', '.').toDoubleOrNull(),
+                    longitude = lon.replace(',', '.').toDoubleOrNull(),
+                    altitude = alt.replace(',', '.').toDoubleOrNull(),
+                    coordinateUncertaintyInMeters = accuracy.replace(',', '.').toDoubleOrNull(),
+                    geodeticDatum = existing?.geodeticDatum ?: session?.geodeticDatum ?: project?.defaultDatum ?: "SIRGAS 2000",
+                    occurrenceRemarks = remarks,
+                    fieldNotes = fieldNotes,
+                    dynamicFieldsJson = flatJson(dynamic)
+                )
+                if (count.isNotBlank() && occurrenceToSave.individualCount == null) {
+                    viewModel.showMessage("Número de indivíduos precisa ser um número inteiro.")
+                    return@FloatingActionButton
+                }
                 val faltando = missingRequiredFields(
                     enabledFields = enabledFields,
                     occurrence = occurrenceToSave,
-                    dynamicValues = dynamicValues
+                    dynamicValues = dynamic
                 )
                 if (faltando.isNotEmpty()) {
-                    viewModel.showMessage(
-                        "Preencha antes de salvar: " + faltando.joinToString(", ") { it.labelPt }
-                    )
+                    if (faltando.any { it.dwcTerm !in fixedOccurrenceTerms }) showAdvanced = true
+                    viewModel.showMessage("Preencha antes de salvar: " + faltando.joinToString(", ") { it.labelPt })
                 } else {
-                    viewModel.saveOccurrenceWithMedia(occurrenceToSave, pendingMedia) {
-                        pendingMedia.clear()
+                    val pending = form.pendingMedia
+                    viewModel.saveOccurrenceWithMedia(occurrenceToSave, pending) {
+                        form.pendingMedia = emptyList()
+                        form.dirty = false
                         onBack()
                     }
                 }
             }) { Icon(Icons.Default.Save, ui("Salvar")) }
         }
     ) { padding ->
-        Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            HelpCard("Registro de ocorrência", "Registro é cada espécie, indivíduo, som, foto, vestígio ou observação feita dentro da expedição.")
+        Column(
+            Modifier.padding(padding).verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 104.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            if (!simpleMode) HelpCard("Registro de ocorrência", "Registro é cada espécie, indivíduo, som, foto, vestígio ou observação feita dentro da expedição.")
             ChipRow("Grupo do registro", moduleOptions.map { it to moduleDisplayName(it) }, formType) {
                 formType = it
                 occurrenceType = occurrenceTypesFor(it).first()
             }
             ChipRow("Tipo de ocorrência", occurrenceTypesFor(formType).map { it to it }, occurrenceType) { occurrenceType = it }
+            if (enabled("scientificName", enabledFields)) TextInput(
+                label("scientificName", enabledFields, "Nome da espécie"),
+                scientificName,
+                autoCorrect = false,
+                capitalization = KeyboardCapitalization.Sentences,
+                help = "Use o nome científico, se souber. Exemplo: Boana faber. O teclado não corrige este campo."
+            ) { scientificName = it }
+            if (enabled("vernacularName", enabledFields)) TextInput(label("vernacularName", enabledFields, "Nome popular"), vernacularName) { vernacularName = it }
             if (enabled("eventDate", enabledFields)) DateInput(label("eventDate", enabledFields, "Data do registro"), occurrenceDate) { occurrenceDate = it }
             if (enabled("eventTime", enabledFields)) TimeInput(label("eventTime", enabledFields, "Hora do registro"), occurrenceTime) { occurrenceTime = it }
             // occurrenceID continua sendo gerado sempre; o campo so aparece se o
             // projeto pedir. Ocultar a caixa nao desliga o identificador.
-            if (enabled("occurrenceID", enabledFields)) TextInput(label("occurrenceID", enabledFields, "Registro científico"), occurrenceID, help = "Identificador Darwin Core occurrenceID. É gerado automaticamente; edite apenas se precisar casar com um identificador externo.") { occurrenceID = it }
-            if (enabled("recordNumber", enabledFields)) TextInput(label("recordNumber", enabledFields, "Registro de campo"), recordNumber, help = "Código amigável do ponto ou registro. Exemplo: P03, T1-P03 ou Registro #0003.") { recordNumber = it }
-            if (enabled("scientificName", enabledFields)) TextInput(label("scientificName", enabledFields, "Nome da espécie"), scientificName, help = "Use o nome científico da espécie, se souber. Exemplo: Boana faber.") { scientificName = it }
-            if (enabled("vernacularName", enabledFields)) TextInput(label("vernacularName", enabledFields, "Nome popular"), vernacularName) { vernacularName = it }
+            if (enabled("occurrenceID", enabledFields)) TextInput(label("occurrenceID", enabledFields, "Registro científico"), occurrenceID, autoCorrect = false, help = "Identificador Darwin Core occurrenceID. É gerado automaticamente; edite apenas se precisar casar com um identificador externo.") { occurrenceID = it }
+            if (enabled("recordNumber", enabledFields)) TextInput(label("recordNumber", enabledFields, "Registro de campo"), recordNumber, autoCorrect = false, help = "Código amigável do ponto ou registro. Exemplo: P03, T1-P03 ou Registro #0003.") { recordNumber = it }
             if (enabled("basisOfRecord", enabledFields)) DwcVocabularyInput(
                 label = label("basisOfRecord", enabledFields, "Natureza do registro"),
                 value = basis,
@@ -1904,7 +2182,7 @@ private fun OccurrenceEditScreen(
             ) { lifeStage = it }
             if (enabled("behavior", enabledFields)) TextInput(label("behavior", enabledFields, "Comportamento"), behavior) { behavior = it }
             if (enabled("reproductiveCondition", enabledFields)) TextInput(label("reproductiveCondition", enabledFields, "Condição reprodutiva"), reproductive) { reproductive = it }
-            if (enabled("recordedBy", enabledFields)) TextInput(label("recordedBy", enabledFields, "Quem coletou"), recordedBy) { recordedBy = it }
+            if (enabled("recordedBy", enabledFields)) TextInput(label("recordedBy", enabledFields, "Quem coletou"), recordedBy, help = if (recordedBy.isBlank() && !session?.recordedBy.isNullOrBlank()) "Em branco, a exportação usa o coletor da expedição: ${session?.recordedBy}." else null) { recordedBy = it }
             if (enabled("identifiedBy", enabledFields)) TextInput(label("identifiedBy", enabledFields, "Quem identificou"), identifiedBy) { identifiedBy = it }
             if (enabled("dateIdentified", enabledFields)) DateInput(label("dateIdentified", enabledFields, "Data da identificação"), dateIdentified) { dateIdentified = it }
             LocationFields(project?.coordinateFormat ?: "DD", lat, lon, alt, accuracy, { lat = it }, { lon = it }, { alt = it }, { accuracy = it }) {
@@ -1912,71 +2190,68 @@ private fun OccurrenceEditScreen(
                     location?.let {
                         lat = it.latitude.toString()
                         lon = it.longitude.toString()
-                        alt = it.altitude?.toString().orEmpty()
-                        accuracy = it.accuracyMeters?.toString().orEmpty()
+                        alt = it.altitude?.let { value -> formatPlain(value) }.orEmpty()
+                        accuracy = it.accuracyMeters?.let { value -> formatPlain(value) }.orEmpty()
                     }
                 }
             }
             if (enabled("occurrenceRemarks", enabledFields)) TextInput(label("occurrenceRemarks", enabledFields, "Observações da ocorrência"), remarks, minLines = 3) { remarks = it }
             if (enabled("fieldNotes", enabledFields)) TextInput(label("fieldNotes", enabledFields, "Anotações de campo"), fieldNotes, minLines = 5, help = "Use para anotações rápidas, descrição detalhada, dúvidas de identificação, observações de laboratório ou coleção.") { fieldNotes = it }
+            visibleExtras.forEach { field -> ExtraFieldInput(field, dynamicValues) }
             OutlinedButton(onClick = { showAdvanced = !showAdvanced }) {
-                Text(if (showAdvanced) "Ocultar campos avançados" else "Mostrar campos avançados")
+                Text(if (showAdvanced) ui("Ocultar campos avançados") else ui("Mostrar campos avançados"))
             }
             AnimatedVisibility(visible = showAdvanced) {
-                AdvancedOccurrenceSections(formType, dynamicValues, enabledFields)
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    AdvancedOccurrenceSections(formType, dynamicValues, enabledFields)
+                }
             }
-            Text(ui("Campos Darwin Core extras"), style = MaterialTheme.typography.titleMedium)
-            enabledFields
-                .filterNot { it.dwcTerm in fixedOccurrenceTerms }
-                .filterNot { it.dwcTerm in advancedOccurrenceTerms }
-                .forEach { field ->
-                    val fieldLabel = "${field.labelPt} (${field.dwcTerm})"
-                    val definition = DarwinCoreCatalog.byTerm[field.dwcTerm]
-                    when {
-                        definition != null && definition.vocabulary.isNotEmpty() ->
-                            DwcVocabularyInput(fieldLabel, dynamicValues[field.dwcTerm].orEmpty(), definition.vocabulary) { dynamicValues[field.dwcTerm] = it }
-                        field.fieldType == "date" || field.dwcTerm.contains("Date", ignoreCase = true) ->
-                            DateInput(fieldLabel, dynamicValues[field.dwcTerm].orEmpty()) { dynamicValues[field.dwcTerm] = it }
-                        field.fieldType == "time" || field.dwcTerm.contains("Time", ignoreCase = true) ->
-                            TimeInput(fieldLabel, dynamicValues[field.dwcTerm].orEmpty()) { dynamicValues[field.dwcTerm] = it }
-                        field.fieldType == "integer" ->
-                            TextInput(fieldLabel, dynamicValues[field.dwcTerm].orEmpty(), KeyboardType.Number) { dynamicValues[field.dwcTerm] = it }
-                        field.fieldType == "decimal" ->
-                            TextInput(fieldLabel, dynamicValues[field.dwcTerm].orEmpty(), KeyboardType.Decimal) { dynamicValues[field.dwcTerm] = it }
-                        field.fieldType == "long_text" ->
-                            TextInput(fieldLabel, dynamicValues[field.dwcTerm].orEmpty(), minLines = 3) { dynamicValues[field.dwcTerm] = it }
-                        else ->
-                            TextInput(fieldLabel, dynamicValues[field.dwcTerm].orEmpty()) { dynamicValues[field.dwcTerm] = it }
-                    }
-                }
             Text(ui("Mídias da ocorrência"), style = MaterialTheme.typography.titleMedium)
-            InlineMediaCapture(
-                viewModel = viewModel,
-                projectId = projectId,
-                sessionId = sessionId,
-                occurrenceId = occurrenceId,
-                occurrenceForName = occurrenceToName(
-                    occurrenceID = occurrenceID,
-                    scientificName = scientificName,
-                    recordNumber = recordNumber
-                ),
-                modifier = Modifier.fillMaxWidth(),
-                pendingMedia = pendingMedia,
-                onPendingMediaAdded = { pendingMedia.add(it) },
-                onPendingMediaDeleted = {
-                    pendingMedia.remove(it)
-                    viewModel.mediaFiles.deleteIfManaged(it.filePath)
-                },
-                onPhotoMetadata = { metadata ->
-                    metadata.capturedAt?.let {
-                        occurrenceDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(it))
-                        occurrenceTime = SimpleDateFormat("HH:mm", Locale.US).format(Date(it))
+            val currentProject = project
+            val currentSession = session
+            if (currentProject != null && currentSession != null) {
+                InlineMediaCapture(
+                    viewModel = viewModel,
+                    project = currentProject,
+                    session = currentSession,
+                    target = MediaTarget(projectId, sessionId, occurrenceId, if (occurrenceId == null) draftKey else null),
+                    occurrenceForName = occurrenceToName(occurrenceID, scientificName, recordNumber),
+                    pendingMedia = form.pendingMedia,
+                    onPendingMediaChanged = {
+                        form.pendingMedia = it
+                        form.dirty = true
+                    },
+                    onPhotoMetadata = { metadata ->
+                        if (lat.isBlank()) metadata.latitude?.let { lat = CoordinateUtils.roundCoordinate(it).toString() }
+                        if (lon.isBlank()) metadata.longitude?.let { lon = CoordinateUtils.roundCoordinate(it).toString() }
                     }
-                    if (lat.isBlank()) metadata.latitude?.let { lat = it.toString() }
-                    if (lon.isBlank()) metadata.longitude?.let { lon = it.toString() }
-                }
-            )
+                )
+            }
         }
+    }
+}
+
+/** Campo extra do catalogo, com o tipo de entrada que ele declara. */
+@Composable
+private fun ExtraFieldInput(field: FieldConfigEntity, values: DynamicValues) {
+    val fieldLabel = "${fieldDisplayLabel(field)} (${field.dwcTerm})"
+    val definition = DarwinCoreCatalog.byTerm[field.dwcTerm]
+    val autoCorrect = field.dwcTerm !in DarwinCoreCatalog.noAutocorrectTerms
+    when {
+        definition != null && definition.vocabulary.isNotEmpty() ->
+            DwcVocabularyInput(fieldLabel, values[field.dwcTerm], definition.vocabulary) { values[field.dwcTerm] = it }
+        field.fieldType == "date" ->
+            DateInput(fieldLabel, values[field.dwcTerm]) { values[field.dwcTerm] = it }
+        field.fieldType == "time" ->
+            TimeInput(fieldLabel, values[field.dwcTerm]) { values[field.dwcTerm] = it }
+        field.fieldType == "integer" ->
+            TextInput(fieldLabel, values[field.dwcTerm], KeyboardType.Number) { values[field.dwcTerm] = it }
+        field.fieldType == "decimal" ->
+            TextInput(fieldLabel, values[field.dwcTerm], KeyboardType.Decimal) { values[field.dwcTerm] = it }
+        field.fieldType == "long_text" ->
+            TextInput(fieldLabel, values[field.dwcTerm], minLines = 3) { values[field.dwcTerm] = it }
+        else ->
+            TextInput(fieldLabel, values[field.dwcTerm], autoCorrect = autoCorrect) { values[field.dwcTerm] = it }
     }
 }
 
@@ -1986,73 +2261,6 @@ private fun MediaScreen(viewModel: AppViewModel, projectId: Long, sessionId: Lon
     val session by viewModel.observeSession(sessionId).collectAsState(initial = null)
     val occurrence by (occurrenceId?.let { viewModel.observeOccurrence(it) } ?: kotlinx.coroutines.flow.flowOf(null)).collectAsState(initial = null)
     val media by (occurrenceId?.let { viewModel.observeOccurrenceMedia(it) } ?: viewModel.observeSessionMedia(sessionId)).collectAsState(initial = emptyList())
-    var pendingPhoto by remember { mutableStateOf<File?>(null) }
-    var recordingFile by remember { mutableStateOf<File?>(null) }
-    var recordingFormat by remember { mutableStateOf<String?>(null) }
-    var mediaSubject by remember { mutableStateOf("") }
-    var mediaDescription by remember { mutableStateOf("") }
-    val wavRecorder = remember { WavAudioRecorder() }
-    val mp3Recorder = remember { PureMp3AudioRecorder() }
-    val context = LocalContext.current
-
-    val takePicture = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
-        val file = pendingPhoto
-        val currentProject = project
-        if (success && file != null && currentProject != null && session != null) {
-            viewModel.mediaFiles.compressImage(file, currentProject.photoQuality)
-            viewModel.addMedia(mediaEntity(projectId, sessionId, occurrenceId, "photo", file, "image/jpeg", mediaSubject, mediaDescription, readPhotoMetadata(file)))
-        }
-    }
-    val importPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        val currentProject = project
-        val currentSession = session
-        if (uri != null && currentProject != null && currentSession != null) {
-            val baseName = mediaBaseName(currentProject, currentSession, occurrence, mediaSubject, "FOTO")
-            val file = viewModel.mediaFiles.importUri(uri, currentProject.name, currentSession.name, "photo", "image/jpeg", baseName)
-            viewModel.addMedia(mediaEntity(projectId, sessionId, occurrenceId, "photo", file, "image/jpeg", mediaSubject, mediaDescription, readPhotoMetadata(file)))
-        }
-    }
-    val importAudio = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        val currentProject = project
-        val currentSession = session
-        if (uri != null && currentProject != null && currentSession != null) {
-            val mime = viewModel.getApplication<OikosApplication>().contentResolver.getType(uri) ?: "audio/wav"
-            val baseName = mediaBaseName(currentProject, currentSession, occurrence, mediaSubject, "AUDIO")
-            val file = viewModel.mediaFiles.importUri(uri, currentProject.name, currentSession.name, "audio", mime, baseName)
-            viewModel.addMedia(mediaEntity(projectId, sessionId, occurrenceId, "audio", file, mime, mediaSubject, mediaDescription))
-        }
-    }
-    fun launchCameraCapture() {
-        val baseName = mediaBaseName(project, session, occurrence, mediaSubject, "FOTO")
-        val file = viewModel.mediaFiles.createImageFile(project?.name ?: "Projeto", session?.name ?: "Expedição", baseName)
-        pendingPhoto = file
-        takePicture.launch(viewModel.mediaFiles.uriFor(file))
-    }
-    fun startAudioRecording() {
-        if (!hasPermission(context, Manifest.permission.RECORD_AUDIO)) {
-            viewModel.showMessage("Permissão de áudio negada.")
-            return
-        }
-        val audioFormat = project?.audioFormat ?: "wav"
-        val baseName = mediaBaseName(project, session, occurrence, mediaSubject, "AUDIO")
-        val file = viewModel.mediaFiles.createAudioFile(project?.name ?: "Projeto", session?.name ?: "Expedição", audioFormat, baseName)
-        val started = runCatching {
-            startAudioRecorder(audioFormat, file, mp3Recorder, wavRecorder)
-        }.onFailure {
-            file.delete()
-            viewModel.showMessage(it.message ?: "Não foi possível iniciar a gravação de áudio.")
-        }.isSuccess
-        if (started) {
-            recordingFormat = audioFormat
-            recordingFile = file
-        }
-    }
-    val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) launchCameraCapture() else viewModel.showMessage("Permissão de câmera negada.")
-    }
-    val audioPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) startAudioRecording() else viewModel.showMessage("Permissão de áudio negada.")
-    }
 
     Scaffold(
         modifier = modifier,
@@ -2072,47 +2280,23 @@ private fun MediaScreen(viewModel: AppViewModel, projectId: Long, sessionId: Lon
                     HelpCard("Mídias vinculadas", "Use mídias para registrar fotos e áudios ligados a esta ocorrência. A exportação preserva occurrenceID/eventID e associatedMedia.")
                 }
             }
-            if (occurrenceId != null) {
+            val currentProject = project
+            val currentSession = session
+            if (currentProject != null && currentSession != null) {
                 item {
-                    TextInput("O que esta mídia mostra ou registra?", mediaSubject, help = "Exemplos: indivíduo inteiro, folha, flor, microhabitat, canto reprodutivo, chamado territorial, observação narrada.") { mediaSubject = it }
-                }
-                item {
-                    TextInput("Descrição da mídia", mediaDescription, minLines = 2) { mediaDescription = it }
-                }
-            }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
-                    Button(onClick = {
-                        if (hasPermission(context, Manifest.permission.CAMERA)) launchCameraCapture()
-                        else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                    }) { Icon(Icons.Default.CameraAlt, null); Spacer(Modifier.width(6.dp)); Text(ui("Foto")) }
-                    OutlinedButton(onClick = { importPhoto.launch("image/*") }) { Icon(Icons.Default.Photo, null); Spacer(Modifier.width(6.dp)); Text(ui("Anexar foto")) }
-                }
-            }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
-                    Button(onClick = {
-                        if (recordingFormat == null) {
-                            if (hasPermission(context, Manifest.permission.RECORD_AUDIO)) startAudioRecording()
-                            else audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                        } else {
-                            if (recordingFormat == "mp3") mp3Recorder.stop() else wavRecorder.stop()
-                            val finishedFormat = recordingFormat
-                            recordingFormat = null
-                            recordingFile?.let {
-                                val mime = if (finishedFormat == "mp3") "audio/mpeg" else "audio/wav"
-                                viewModel.addMedia(mediaEntity(projectId, sessionId, occurrenceId, "audio", it, mime, mediaSubject, mediaDescription))
-                            }
-                            recordingFile = null
-                        }
-                    }) { Icon(Icons.Default.Mic, null); Spacer(Modifier.width(6.dp)); Text(if (recordingFormat == null) "Gravar ${project?.audioFormat?.uppercase() ?: "WAV"}" else "Parar") }
-                    OutlinedButton(onClick = { importAudio.launch("audio/*") }) { Icon(Icons.Default.FileUpload, null); Spacer(Modifier.width(6.dp)); Text(ui("Anexar áudio")) }
+                    MediaCaptureControls(
+                        viewModel = viewModel,
+                        project = currentProject,
+                        session = currentSession,
+                        target = MediaTarget(projectId, sessionId, occurrenceId, null),
+                        occurrenceForName = occurrence?.toMediaOccurrenceName()
+                    )
                 }
             }
             if (media.isEmpty()) {
                 item { EmptyState("Sem mídias.", "Fotos e áudios ficam em arquivos locais; o banco guarda só metadados.") }
             } else {
-                items(media) { MediaListCard(it, onUpdate = { updated -> viewModel.updateMedia(updated) }, onDelete = { viewModel.deleteMedia(it) }) }
+                items(media, key = { it.id }) { MediaListCard(it, onUpdate = { updated -> viewModel.updateMedia(updated) }, onDelete = { viewModel.deleteMedia(it) }) }
             }
         }
     }
@@ -2120,8 +2304,9 @@ private fun MediaScreen(viewModel: AppViewModel, projectId: Long, sessionId: Lon
 
 @Composable
 private fun ExportScreen(viewModel: AppViewModel, projectId: Long, sessionId: Long?, modifier: Modifier, onBack: () -> Unit, onShare: (Intent, String?) -> Unit) {
-    var selectedContent by remember { mutableStateOf(ExportContent.SpreadsheetsAndAllMedia) }
-    var selectedFormat by remember { mutableStateOf(ExportFormat.Zip) }
+    var selectedContent by rememberSaveable { mutableStateOf(ExportContent.SpreadsheetsAndAllMedia) }
+    var selectedFormat by rememberSaveable { mutableStateOf(ExportFormat.Zip) }
+    val exporting by viewModel.exporting.collectAsState()
     Scaffold(modifier = modifier, topBar = { OikosTopBar(if (sessionId == null) "Exportar projeto" else "Exportar expedição", onBack) }) { padding ->
         Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(ui("Exportar dados"), style = MaterialTheme.typography.titleLarge)
@@ -2129,7 +2314,7 @@ private fun ExportScreen(viewModel: AppViewModel, projectId: Long, sessionId: Lo
             Text(ui("Para não perder o vínculo entre fotos, áudios e registros, recomendamos exportar como ZIP completo."))
             HelpCard(
                 "ZIP organizado",
-                "O ZIP cria 01_planilha_principal, 02_tabelas_de_apoio, 03_sig_qgis e 04_midias. A planilha principal reúne as ocorrências do escopo escolhido com os campos Darwin Core e os campos configurados no projeto."
+                "O ZIP cria 01_planilha_principal, 02_tabelas_de_apoio, 03_sig_qgis, 04_darwin_core_archive e 05_midias. A planilha principal reúne as ocorrências do escopo escolhido com os campos Darwin Core e os campos configurados no projeto."
             )
             HelpCard("Trilhas GPS", "O ZIP completo inclui trilha_gps_pontos.csv e o GeoJSON inclui a trilha da expedição como LineString. No QGIS, estilize featureType=expeditionTrack em laranja para ver o percurso.")
             Text(ui("Conteúdo"), style = MaterialTheme.typography.titleMedium)
@@ -2180,13 +2365,14 @@ private fun ExportScreen(viewModel: AppViewModel, projectId: Long, sessionId: Lo
                         "Darwin Core Archive",
                         "Pacote com meta.xml e eml.xml, no formato que o IPT, o GBIF e o SiBBr " +
                             "importam sem retrabalho. Campos próprios do Oikos saem como " +
-                            "MeasurementOrFact e as mídias como Simple Multimedia. Revise a licença " +
-                            "no eml.xml antes de publicar."
+                            "MeasurementOrFact. As mídias entram como Simple Multimedia quando o " +
+                            "projeto tem URL pública das mídias. Licença, autor e URL ficam em Editar projeto."
                     )
                 }
             }
             Button(
                 modifier = Modifier.fillMaxWidth().height(56.dp),
+                enabled = !exporting,
                 onClick = {
                     if (sessionId == null) viewModel.exportProject(projectId, selectedFormat, selectedContent, onShare)
                     else viewModel.exportSession(projectId, sessionId, selectedFormat, selectedContent, onShare)
@@ -2194,7 +2380,15 @@ private fun ExportScreen(viewModel: AppViewModel, projectId: Long, sessionId: Lo
             ) {
                 Icon(Icons.Default.Share, null)
                 Spacer(Modifier.width(8.dp))
-                Text(ui("Exportar e compartilhar/salvar"))
+                Text(if (exporting) ui("Exportando...") else ui("Exportar e compartilhar/salvar"))
+            }
+            if (exporting) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                Text(
+                    ui("Montando o pacote. Com muitos áudios pode levar alguns minutos; não feche o app."),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             Text(
                 ui("Depois de tocar no botão, escolha WhatsApp, Google Drive, Files/Arquivos ou outro app na tela de compartilhamento do Android."),
@@ -2205,92 +2399,70 @@ private fun ExportScreen(viewModel: AppViewModel, projectId: Long, sessionId: Lo
     }
 }
 
+/**
+ * Botoes de foto e audio, com o estado da gravacao.
+ *
+ * A gravacao pertence ao ViewModel: girar a tela nao a interrompe. Sair da tela
+ * (ou o app ir para segundo plano) encerra e SALVA a gravacao. Antes, sair da
+ * tela deixava o gravador rodando sem dono: o arquivo crescia sem parar, nunca
+ * entrava na lista e o microfone ficava preso.
+ */
 @Composable
-private fun InlineMediaCapture(
+private fun MediaCaptureControls(
     viewModel: AppViewModel,
-    projectId: Long,
-    sessionId: Long,
-    occurrenceId: Long?,
-    modifier: Modifier = Modifier,
-    occurrenceForName: MediaOccurrenceName? = null,
-    pendingMedia: List<MediaEntity> = emptyList(),
-    onPendingMediaAdded: (MediaEntity) -> Unit = {},
-    onPendingMediaDeleted: (MediaEntity) -> Unit = {},
+    project: ProjectEntity,
+    session: SessionEntity,
+    target: MediaTarget,
+    occurrenceForName: MediaOccurrenceName?,
     onPhotoMetadata: (PhotoMetadata) -> Unit = {}
 ) {
-    val project by viewModel.observeProject(projectId).collectAsState(initial = null)
-    val session by viewModel.observeSession(sessionId).collectAsState(initial = null)
-    val savedMedia by (occurrenceId?.let { viewModel.observeOccurrenceMedia(it) } ?: kotlinx.coroutines.flow.flowOf(emptyList())).collectAsState(initial = emptyList())
-    val savedOccurrence by (occurrenceId?.let { viewModel.observeOccurrence(it) } ?: kotlinx.coroutines.flow.flowOf(null)).collectAsState(initial = null)
-    val nameOccurrence = occurrenceForName ?: savedOccurrence?.toMediaOccurrenceName()
-    val media = if (occurrenceId == null) pendingMedia else savedMedia
-    var pendingPhoto by remember { mutableStateOf<File?>(null) }
-    var recordingFile by remember { mutableStateOf<File?>(null) }
-    var recordingFormat by remember { mutableStateOf<String?>(null) }
-    var mediaSubject by remember { mutableStateOf("") }
-    var mediaDescription by remember { mutableStateOf("") }
-    val wavRecorder = remember { WavAudioRecorder() }
-    val mp3Recorder = remember { PureMp3AudioRecorder() }
     val context = LocalContext.current
+    var mediaSubject by rememberSaveable { mutableStateOf("") }
+    var mediaDescription by rememberSaveable { mutableStateOf("") }
+    // Caminho da foto em andamento: salvo no Bundle porque o Android pode fechar
+    // o app enquanto a camera esta aberta, e a foto se perdia na volta.
+    var pendingPhotoPath by rememberSaveable { mutableStateOf<String?>(null) }
+    val recording by viewModel.recording.collectAsState()
+    val recordingHere = recording?.target == target
+    val recordingElsewhere = recording != null && !recordingHere
 
     val takePicture = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
-        val file = pendingPhoto
-        val currentProject = project
-        if (success && file != null && currentProject != null && session != null) {
-            viewModel.mediaFiles.compressImage(file, currentProject.photoQuality)
-            val metadata = readPhotoMetadata(file)
-            onPhotoMetadata(metadata)
-            val entity = mediaEntity(projectId, sessionId, occurrenceId, "photo", file, "image/jpeg", mediaSubject, mediaDescription, metadata)
-            if (occurrenceId == null) onPendingMediaAdded(entity) else viewModel.addMedia(entity)
+        val path = pendingPhotoPath
+        pendingPhotoPath = null
+        if (path == null) return@rememberLauncherForActivityResult
+        val file = File(path)
+        if (success && file.length() > 0L) {
+            viewModel.processCapturedPhoto(file, target, project.photoQuality, mediaSubject, mediaDescription, onPhotoMetadata)
+        } else {
+            file.delete()
         }
     }
     val importPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        val currentProject = project
-        val currentSession = session
-        if (uri != null && currentProject != null && currentSession != null) {
-            val baseName = mediaBaseName(currentProject, currentSession, nameOccurrence, mediaSubject, "FOTO")
-            val file = viewModel.mediaFiles.importUri(uri, currentProject.name, currentSession.name, "photo", "image/jpeg", baseName)
-            val metadata = readPhotoMetadata(file)
-            onPhotoMetadata(metadata)
-            val entity = mediaEntity(projectId, sessionId, occurrenceId, "photo", file, "image/jpeg", mediaSubject, mediaDescription, metadata)
-            if (occurrenceId == null) onPendingMediaAdded(entity) else viewModel.addMedia(entity)
+        if (uri != null) {
+            val baseName = mediaBaseName(project, session, occurrenceForName, mediaSubject, "FOTO")
+            viewModel.importMedia(uri, "photo", target, baseName, project.photoQuality, mediaSubject, mediaDescription, onPhotoMetadata)
         }
     }
     val importAudio = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        val currentProject = project
-        val currentSession = session
-        if (uri != null && currentProject != null && currentSession != null) {
-            val mime = viewModel.getApplication<OikosApplication>().contentResolver.getType(uri) ?: "audio/wav"
-            val baseName = mediaBaseName(currentProject, currentSession, nameOccurrence, mediaSubject, "AUDIO")
-            val file = viewModel.mediaFiles.importUri(uri, currentProject.name, currentSession.name, "audio", mime, baseName)
-            val entity = mediaEntity(projectId, sessionId, occurrenceId, "audio", file, mime, mediaSubject, mediaDescription)
-            if (occurrenceId == null) onPendingMediaAdded(entity) else viewModel.addMedia(entity)
+        if (uri != null) {
+            val baseName = mediaBaseName(project, session, occurrenceForName, mediaSubject, "AUDIO")
+            viewModel.importMedia(uri, "audio", target, baseName, project.photoQuality, mediaSubject, mediaDescription)
         }
     }
     fun launchCameraCapture() {
-        val baseName = mediaBaseName(project, session, nameOccurrence, mediaSubject, "FOTO")
-        val file = viewModel.mediaFiles.createImageFile(project?.name ?: "Projeto", session?.name ?: "Expedição", baseName)
-        pendingPhoto = file
-        takePicture.launch(viewModel.mediaFiles.uriFor(file))
+        val baseName = mediaBaseName(project, session, occurrenceForName, mediaSubject, "FOTO")
+        val file = viewModel.mediaFiles.createImageFile(project.id, session.id, baseName)
+        pendingPhotoPath = file.absolutePath
+        runCatching { takePicture.launch(viewModel.mediaFiles.uriFor(file)) }
+            .onFailure {
+                file.delete()
+                pendingPhotoPath = null
+                viewModel.showMessage("Nenhum app de câmera disponível.")
+            }
     }
     fun startAudioRecording() {
-        if (!hasPermission(context, Manifest.permission.RECORD_AUDIO)) {
-            viewModel.showMessage("Permissão de áudio negada.")
-            return
-        }
-        val audioFormat = project?.audioFormat ?: "wav"
-        val baseName = mediaBaseName(project, session, nameOccurrence, mediaSubject, "AUDIO")
-        val file = viewModel.mediaFiles.createAudioFile(project?.name ?: "Projeto", session?.name ?: "Expedição", audioFormat, baseName)
-        val started = runCatching {
-            startAudioRecorder(audioFormat, file, mp3Recorder, wavRecorder)
-        }.onFailure {
-            file.delete()
-            viewModel.showMessage(it.message ?: "Não foi possível iniciar a gravação de áudio.")
-        }.isSuccess
-        if (started) {
-            recordingFormat = audioFormat
-            recordingFile = file
-        }
+        val baseName = mediaBaseName(project, session, occurrenceForName, mediaSubject, "AUDIO")
+        viewModel.startRecording(target, project.audioFormat, baseName, mediaSubject, mediaDescription)
     }
     val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) launchCameraCapture() else viewModel.showMessage("Permissão de câmera negada.")
@@ -2299,57 +2471,143 @@ private fun InlineMediaCapture(
         if (granted) startAudioRecording() else viewModel.showMessage("Permissão de áudio negada.")
     }
 
-    Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            HelpCard("Mídias vinculadas", "Fotos e áudios ficam ligados ao projeto, expedição e occurrenceID/eventID. A exportação preserva associatedMedia.")
-            TextInput("O que esta mídia mostra ou registra?", mediaSubject, help = "Exemplos: indivíduo inteiro, folha, flor, microhabitat, canto reprodutivo, chamado territorial, observação narrada.") { mediaSubject = it }
-            TextInput("Descrição da mídia", mediaDescription, minLines = 2) { mediaDescription = it }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
-                Button(onClick = {
-                    if (hasPermission(context, Manifest.permission.CAMERA)) launchCameraCapture()
-                    else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                }) { Icon(Icons.Default.CameraAlt, null); Spacer(Modifier.width(6.dp)); Text(ui("Foto")) }
-                OutlinedButton(onClick = { importPhoto.launch("image/*") }) { Icon(Icons.Default.Photo, null); Spacer(Modifier.width(6.dp)); Text(ui("Anexar foto")) }
+    // Tela acesa enquanto grava; ao sair da tela (nao em rotacao), salva.
+    val view = LocalView.current
+    DisposableEffect(recordingHere) {
+        view.keepScreenOn = recordingHere
+        onDispose { view.keepScreenOn = false }
+    }
+    DisposableEffect(target) {
+        onDispose {
+            val activity = context.findActivity()
+            if (activity?.isChangingConfigurations != true && viewModel.recording.value?.target == target) {
+                viewModel.stopRecording("Gravação salva ao sair da tela.")
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
-                Button(onClick = {
-                    if (recordingFormat == null) {
-                        if (hasPermission(context, Manifest.permission.RECORD_AUDIO)) startAudioRecording()
-                        else audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        TextInput("O que esta mídia mostra ou registra?", mediaSubject, help = "Exemplos: indivíduo inteiro, folha, flor, microhabitat, canto reprodutivo, chamado territorial, observação narrada.") { mediaSubject = it }
+        TextInput("Descrição da mídia", mediaDescription, minLines = 2) { mediaDescription = it }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+            Button(onClick = {
+                if (hasPermission(context, Manifest.permission.CAMERA)) launchCameraCapture()
+                else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+            }) { Icon(Icons.Default.CameraAlt, null); Spacer(Modifier.width(6.dp)); Text(ui("Foto")) }
+            OutlinedButton(onClick = { importPhoto.launch("image/*") }) { Icon(Icons.Default.Photo, null); Spacer(Modifier.width(6.dp)); Text(ui("Anexar foto")) }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+            Button(
+                enabled = !recordingElsewhere,
+                onClick = {
+                    if (recordingHere) {
+                        viewModel.stopRecording()
+                    } else if (hasPermission(context, Manifest.permission.RECORD_AUDIO)) {
+                        startAudioRecording()
                     } else {
-                        if (recordingFormat == "mp3") mp3Recorder.stop() else wavRecorder.stop()
-                        val finishedFormat = recordingFormat
-                        recordingFormat = null
-                        recordingFile?.let {
-                            val mime = if (finishedFormat == "mp3") "audio/mpeg" else "audio/wav"
-                            val entity = mediaEntity(projectId, sessionId, occurrenceId, "audio", it, mime, mediaSubject, mediaDescription)
-                            if (occurrenceId == null) onPendingMediaAdded(entity) else viewModel.addMedia(entity)
-                        }
-                        recordingFile = null
+                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     }
-                }) { Icon(Icons.Default.Mic, null); Spacer(Modifier.width(6.dp)); Text(if (recordingFormat == null) "Gravar ${project?.audioFormat?.uppercase() ?: "WAV"}" else "Parar") }
-                OutlinedButton(onClick = { importAudio.launch("audio/*") }) { Icon(Icons.Default.FileUpload, null); Spacer(Modifier.width(6.dp)); Text(ui("Anexar áudio")) }
+                }
+            ) {
+                Icon(Icons.Default.Mic, null)
+                Spacer(Modifier.width(6.dp))
+                Text(if (recordingHere) ui("Parar e salvar") else "${ui("Gravar")} ${project.audioFormat.uppercase()}")
             }
+            OutlinedButton(onClick = { importAudio.launch("audio/*") }) { Icon(Icons.Default.FileUpload, null); Spacer(Modifier.width(6.dp)); Text(ui("Anexar áudio")) }
+        }
+        recording?.takeIf { recordingHere }?.let { state -> RecordingStatus(viewModel, state) }
+        if (recordingElsewhere) {
+            Text(ui("Há uma gravação em andamento em outra tela."), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+        }
+    }
+}
+
+/** Tempo decorrido e nivel do sinal, para o pesquisador ver que esta gravando. */
+@Composable
+private fun RecordingStatus(viewModel: AppViewModel, state: RecordingState) {
+    var elapsed by remember(state.startedAt) { mutableLongStateOf(0L) }
+    var level by remember { mutableStateOf(0f) }
+    LaunchedEffect(state.startedAt) {
+        while (true) {
+            elapsed = System.currentTimeMillis() - state.startedAt
+            level = viewModel.recordingLevel()
+            delay(200)
+        }
+    }
+    Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.medium) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            val seconds = elapsed / 1000
+            Text(
+                "● ${ui("Gravando")} ${String.format(Locale.US, "%02d:%02d", seconds / 60, seconds % 60)}",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+            if (state.format != "mp3") {
+                LinearProgressIndicator(progress = { level }, modifier = Modifier.fillMaxWidth())
+            }
+            Text(
+                ui("A tela fica acesa durante a gravação. Sair da tela ou do app encerra e salva o áudio."),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+        }
+    }
+}
+
+@Composable
+private fun InlineMediaCapture(
+    viewModel: AppViewModel,
+    project: ProjectEntity,
+    session: SessionEntity,
+    target: MediaTarget,
+    occurrenceForName: MediaOccurrenceName?,
+    pendingMedia: List<MediaEntity>,
+    onPendingMediaChanged: (List<MediaEntity>) -> Unit,
+    onPhotoMetadata: (PhotoMetadata) -> Unit = {}
+) {
+    val savedMedia by (target.occurrenceId?.let { viewModel.observeOccurrenceMedia(it) } ?: kotlinx.coroutines.flow.flowOf(emptyList())).collectAsState(initial = emptyList())
+    val isDraft = target.draftKey != null
+    val media = if (isDraft) pendingMedia else savedMedia
+
+    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            MediaCaptureControls(viewModel, project, session, target, occurrenceForName, onPhotoMetadata)
             if (media.isEmpty()) {
                 EmptyState("Sem mídias.", "Fotos e áudios ficam em arquivos locais; o banco guarda apenas metadados.")
             } else {
-                media.forEach {
+                if (isDraft) {
+                    Text(
+                        ui("Estas mídias entram no registro ao salvar."),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                media.forEach { item ->
                     MediaListCard(
-                        it,
+                        item,
                         onUpdate = { updated ->
-                            if (occurrenceId == null) {
-                                onPendingMediaDeleted(it)
-                                onPendingMediaAdded(updated)
-                            } else {
-                                viewModel.updateMedia(updated)
-                            }
+                            if (isDraft) onPendingMediaChanged(pendingMedia.map { if (it.filePath == item.filePath) updated else it })
+                            else viewModel.updateMedia(updated)
                         },
-                        onDelete = { if (occurrenceId == null) onPendingMediaDeleted(it) else viewModel.deleteMedia(it) }
+                        onDelete = {
+                            if (isDraft) {
+                                onPendingMediaChanged(pendingMedia.filterNot { it.filePath == item.filePath })
+                                viewModel.discardPendingMedia(listOf(item))
+                            } else {
+                                viewModel.deleteMedia(item)
+                            }
+                        }
                     )
                 }
             }
         }
     }
+}
+
+private tailrec fun Context.findActivity(): android.app.Activity? = when (this) {
+    is android.app.Activity -> this
+    is android.content.ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 @Composable
@@ -2473,7 +2731,6 @@ private fun SettingsScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val mapPrefs = remember { context.getSharedPreferences("oikos_map_settings", Context.MODE_PRIVATE) }
     // Os quatro tamanhos exigem percorrer recursivamente o armazenamento do
     // app. Eram calculados durante a composicao, na main thread: com muitas
     // fotos isso segura a interface e pode gerar ANR. Agora sao medidos em
@@ -2502,9 +2759,7 @@ private fun SettingsScreen(
     }
     var confirmClearCache by remember { mutableStateOf(false) }
     var confirmClearMapCache by remember { mutableStateOf(false) }
-    var offlineMapCache by remember { mutableStateOf(mapPrefs.getBoolean("offline_map_cache", false)) }
-    var offlineMapArea by remember { mutableStateOf(mapPrefs.getString("offline_map_area", "20") ?: "20") }
-    var offlineMapDetail by remember { mutableStateOf(mapPrefs.getString("offline_map_detail", "field") ?: "field") }
+    var reverseGeocoding by remember { mutableStateOf(viewModel.reverseGeocodingEnabled) }
     if (confirmClearCache) {
         ConfirmDeleteDialog(
             title = "Limpar cache?",
@@ -2581,45 +2836,30 @@ private fun SettingsScreen(
                 }
             }
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), elevation = CardDefaults.cardElevation(2.dp)) {
-                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(ui("Mapas offline"), style = MaterialTheme.typography.titleMedium)
-                            Text(ui("A trilha GPS continua funcionando sem internet. O mapa de fundo usa cache local quando a área já foi preparada ou visualizada."), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Switch(
-                            checked = offlineMapCache,
-                            onCheckedChange = {
-                                offlineMapCache = it
-                                mapPrefs.edit().putBoolean("offline_map_cache", it).apply()
-                            }
+                Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(ui("Sugerir município e estado pelo GPS"), style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            ui("Usa a internet: a coordenada capturada é enviada ao serviço de endereços do Google. Desligado, nada sai do aparelho. Deixe desligado em locais de espécies sensíveis."),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    AnimatedVisibility(visible = offlineMapCache) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            ChipRow(
-                                "Área para manter em cache",
-                                listOf("2" to "2 km²", "5" to "5 km²", "10" to "10 km²", "20" to "20 km²"),
-                                offlineMapArea
-                            ) {
-                                offlineMapArea = it
-                                mapPrefs.edit().putString("offline_map_area", it).apply()
-                            }
-                            ChipRow(
-                                "Detalhe do mapa",
-                                listOf("light" to "Leve", "field" to "Campo", "detailed" to "Detalhado"),
-                                offlineMapDetail
-                            ) {
-                                offlineMapDetail = it
-                                mapPrefs.edit().putString("offline_map_detail", it).apply()
-                            }
-                            Text(
-                                ui("Use enquanto ainda houver internet para preparar a última área de trabalho. Por política do OpenStreetMap, o app evita downloads massivos do servidor público; para 100% offline em áreas grandes, use pacote offline importado em uma atualização futura."),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
+                    Switch(checked = reverseGeocoding, onCheckedChange = {
+                        reverseGeocoding = it
+                        viewModel.reverseGeocodingEnabled = it
+                    })
+                }
+            }
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), elevation = CardDefaults.cardElevation(2.dp)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // Os antigos controles de "area" e "detalhe" do cache eram
+                    // gravados e nunca lidos: nao faziam nada. O cache real e o
+                    // dos blocos de mapa ja vistos, descrito aqui como e.
+                    Text(ui("Mapa e uso offline"), style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        ui("A coleta, o GPS e a trilha funcionam sem internet. O mapa de fundo guarda os trechos já vistos: abra o mapa da área de trabalho enquanto houver internet e ele continua disponível em campo."),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     Text("${ui("Cache do mapa")}: ${humanSize(mapCache)}")
                     OutlinedButton(onClick = { confirmClearMapCache = true }) {
                         Icon(Icons.Default.Delete, contentDescription = null)
@@ -2704,7 +2944,7 @@ private fun AboutScreen(modifier: Modifier, onBack: () -> Unit) {
                     )
                     Text(ui("Uso de rede e privacidade"), style = MaterialTheme.typography.labelLarge)
                     Text(
-                        ui("A coleta funciona inteiramente offline: projetos, expedições, ocorrências, coordenadas, fotos e áudios ficam apenas no aparelho, e o app não envia esses dados a nenhum servidor. A internet é usada somente para baixar as imagens do mapa do OpenStreetMap, quando você abre a tela de mapa. Nessa requisição o servidor do OpenStreetMap recebe a área visualizada. Se o local da coleta for sensível, mantenha o aparelho sem rede ou evite abrir o mapa em campo; os registros continuam sendo salvos normalmente."),
+                        ui("A coleta funciona inteiramente offline: projetos, expedições, ocorrências, coordenadas, fotos e áudios ficam apenas no aparelho, e o app não envia esses dados a nenhum servidor. A internet é usada em dois casos: para baixar as imagens do mapa do OpenStreetMap, quando você abre a tela de mapa (o servidor recebe a área visualizada), e, só se você ligar essa opção em Configurações, para sugerir município e estado (a coordenada capturada vai ao serviço de endereços do Google). Se o local da coleta for sensível, mantenha essa opção desligada e evite abrir o mapa em campo; os registros continuam sendo salvos normalmente."),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -2840,7 +3080,6 @@ private val englishText = mapOf(
     "Atualizar agora" to "Update now",
     "Iniciar trilha" to "Start track",
     "Parar" to "Stop",
-    "Abrir Maps" to "Open Maps",
     "Centralizar" to "Center",
     "Centralizar usuário" to "Center user",
     "Ver mapa" to "View map",
@@ -2932,7 +3171,7 @@ private val englishText = mapOf(
     "ZIP completo recomendado" to "Complete ZIP recommended",
     "Versão" to "Version",
     "Uso de rede e privacidade" to "Network use and privacy",
-    "A coleta funciona inteiramente offline: projetos, expedições, ocorrências, coordenadas, fotos e áudios ficam apenas no aparelho, e o app não envia esses dados a nenhum servidor. A internet é usada somente para baixar as imagens do mapa do OpenStreetMap, quando você abre a tela de mapa. Nessa requisição o servidor do OpenStreetMap recebe a área visualizada. Se o local da coleta for sensível, mantenha o aparelho sem rede ou evite abrir o mapa em campo; os registros continuam sendo salvos normalmente." to "Data collection works entirely offline: projects, expeditions, occurrences, coordinates, photos and audio stay on the device, and the app sends none of it to any server. The internet is used only to download OpenStreetMap map imagery when you open the map screen. In that request the OpenStreetMap server receives the viewed area. If the collection site is sensitive, keep the device offline or avoid opening the map in the field; records are still saved normally.",
+    "A coleta funciona inteiramente offline: projetos, expedições, ocorrências, coordenadas, fotos e áudios ficam apenas no aparelho, e o app não envia esses dados a nenhum servidor. A internet é usada em dois casos: para baixar as imagens do mapa do OpenStreetMap, quando você abre a tela de mapa (o servidor recebe a área visualizada), e, só se você ligar essa opção em Configurações, para sugerir município e estado (a coordenada capturada vai ao serviço de endereços do Google). Se o local da coleta for sensível, mantenha essa opção desligada e evite abrir o mapa em campo; os registros continuam sendo salvos normalmente." to "Data collection works entirely offline: projects, expeditions, occurrences, coordinates, photos and audio stay on the device, and the app sends none of it to any server. The internet is used in two cases: to download OpenStreetMap map imagery when you open the map screen (the server receives the viewed area) and, only if you turn this option on in Settings, to suggest municipality and state (the captured coordinate goes to the Google address service). If the collection site is sensitive, keep that option off and avoid opening the map in the field; records are still saved normally.",
     "Darwin Core Archive (GBIF/SiBBr)" to "Darwin Core Archive (GBIF/SiBBr)",
     "Calculando o espaço usado..." to "Calculating storage use...",
     "Outro" to "Other",
@@ -2947,14 +3186,6 @@ private val englishText = mapOf(
     "Modo simples / coleta rápida" to "Simple mode / quick collection",
     "Modo simples / coleta rapida" to "Simple mode / quick collection",
     "Menos campos visíveis por padrão; ideal para sol forte, pressa e uso prolongado." to "Fewer fields visible by default; ideal for strong sun, urgency and long field use.",
-    "Mapas offline" to "Offline maps",
-    "A trilha GPS continua funcionando sem internet. O mapa de fundo usa cache local quando a área já foi preparada ou visualizada." to "The GPS track keeps working without internet. The base map uses local cache when the area has already been prepared or viewed.",
-    "Área para manter em cache" to "Area to keep cached",
-    "Detalhe do mapa" to "Map detail",
-    "Leve" to "Light",
-    "Campo" to "Field",
-    "Detalhado" to "Detailed",
-    "Use enquanto ainda houver internet para preparar a última área de trabalho. Por política do OpenStreetMap, o app evita downloads massivos do servidor público; para 100% offline em áreas grandes, use pacote offline importado em uma atualização futura." to "Use this while internet is still available to prepare the latest work area. Due to OpenStreetMap policy, the app avoids mass downloads from the public server; for 100% offline use in large areas, use an imported offline package in a future update.",
     "Cache do mapa" to "Map cache",
     "Apagar cache do mapa" to "Clear map cache",
     "Apagar cache do mapa?" to "Clear map cache?",
@@ -2976,8 +3207,6 @@ private val englishText = mapOf(
     "Ajuda" to "Help",
     "Entendi" to "Got it",
     "Coordenadas" to "Coordinates",
-    "Precisão GPS" to "GPS accuracy",
-    "Mostra o erro aproximado da localização em metros. Quanto menor, melhor. As exportações usam Graus Decimais." to "Shows the approximate location error in meters. Lower is better. Exports use Decimal Degrees.",
     "Preencha Zona, Hemisfério, Leste (Easting) e Norte (Northing). O app converte e salva internamente como latitude/longitude em Graus Decimais para Darwin Core e GeoJSON." to "Fill Zone, Hemisphere, Easting and Northing. The app converts and stores latitude/longitude internally as Decimal Degrees for Darwin Core and GeoJSON.",
     "Coordenada UTM inválida." to "Invalid UTM coordinate.",
     "Zona UTM" to "UTM zone",
@@ -2988,8 +3217,6 @@ private val englishText = mapOf(
     "Norte (Northing)" to "Northing",
     "Latitude DD" to "Latitude DD",
     "Longitude DD" to "Longitude DD",
-    "Precisão (m)" to "Accuracy (m)",
-    "Erro aproximado da localização em metros. Quanto menor, melhor." to "Approximate location error in meters. Lower is better.",
     "Capturar localização atual" to "Capture current location",
     "Seções avançadas" to "Advanced sections",
     "Modo avançado opcional" to "Optional advanced mode",
@@ -3024,6 +3251,56 @@ private val englishText = mapOf(
     "Micélio" to "Mycelium",
     "Amostra fúngica" to "Fungal sample",
     "Registro fotográfico de funga" to "Funga photo record",
+    "Descartar alterações?" to "Discard changes?",
+    "O que foi preenchido nesta tela ainda não foi salvo." to "What you filled in on this screen has not been saved yet.",
+    "Descartar" to "Discard",
+    "Continuar editando" to "Keep editing",
+    "Publicação dos dados" to "Data publication",
+    "Licença dos dados" to "Data license",
+    "Definir depois" to "Decide later",
+    "O GBIF e o SiBBr só publicam com CC0, CC BY ou CC BY-NC. CC BY 4.0 permite qualquer uso, desde que citem a fonte." to "GBIF and SiBBr only publish under CC0, CC BY or CC BY-NC. CC BY 4.0 allows any use as long as the source is credited.",
+    "URL pública das mídias (opcional)" to "Public media URL (optional)",
+    "Endereço onde as fotos e áudios exportados ficarão publicados (Zenodo, site do laboratório). Sem ele, o Darwin Core Archive sai sem a extensão de mídia, porque o padrão exige link público." to "Address where exported photos and audio will be published (Zenodo, lab website). Without it the Darwin Core Archive omits the media extension, because the standard requires a public link.",
+    "Planilha CSV" to "CSV spreadsheet",
+    "Excel Brasil (; e vírgula)" to "Excel Brazil (; and comma)",
+    "Internacional (, e ponto)" to "International (, and dot)",
+    "Nome de quem responde pelos dados. Vai como autor e contato no eml.xml do Darwin Core Archive." to "Person responsible for the data. Used as creator and contact in the Darwin Core Archive eml.xml.",
+    "Dê um nome ao projeto antes de salvar." to "Name the project before saving.",
+    "Ativo" to "Active",
+    "Obrigatório" to "Required",
+    "Ocultar amostragem quantitativa" to "Hide quantitative sampling",
+    "Amostragem quantitativa (parcela, transecto)" to "Quantitative sampling (plot, transect)",
+    "Unidade amostral" to "Sampling unit",
+    "Para inventário quantitativo: indique a expedição de que esta faz parte (campanha > dia > parcela) e o tamanho da unidade amostral. Sem isso não se calcula densidade nem abundância relativa a partir da exportação." to "For quantitative inventories: set the parent expedition (campaign > day > plot) and the size of the sampling unit. Without it, density and relative abundance cannot be computed from the export.",
+    "Faz parte de (parentEventID)" to "Part of (parentEventID)",
+    "Nenhuma" to "None",
+    "Tamanho da unidade amostral (sampleSizeValue)" to "Sampling unit size (sampleSizeValue)",
+    "Unidade (sampleSizeUnit)" to "Unit (sampleSizeUnit)",
+    "Data como anotada (verbatimEventDate)" to "Date as written (verbatimEventDate)",
+    "Exatamente como está na caderneta ou etiqueta, por exemplo \"3-5.iii.2026\"." to "Exactly as written in the notebook or label, for example \"3-5.iii.2026\".",
+    "Gravar" to "Record",
+    "Parar e salvar" to "Stop and save",
+    "Gravando" to "Recording",
+    "A tela fica acesa durante a gravação. Sair da tela ou do app encerra e salva o áudio." to "The screen stays on while recording. Leaving the screen or the app stops and saves the audio.",
+    "Há uma gravação em andamento em outra tela." to "A recording is in progress on another screen.",
+    "Estas mídias entram no registro ao salvar." to "These media are added to the record when you save.",
+    "Exportando..." to "Exporting...",
+    "Montando o pacote. Com muitos áudios pode levar alguns minutos; não feche o app." to "Building the package. With many audio files this may take a few minutes; do not close the app.",
+    "Mapa e uso offline" to "Map and offline use",
+    "A coleta, o GPS e a trilha funcionam sem internet. O mapa de fundo guarda os trechos já vistos: abra o mapa da área de trabalho enquanto houver internet e ele continua disponível em campo." to "Data collection, GPS and tracks work without internet. The base map keeps the areas already viewed: open the map of your work area while online and it stays available in the field.",
+    "Sugerir município e estado pelo GPS" to "Suggest municipality and state from GPS",
+    "Usa a internet: a coordenada capturada é enviada ao serviço de endereços do Google. Desligado, nada sai do aparelho. Deixe desligado em locais de espécies sensíveis." to "Uses the internet: the captured coordinate is sent to Google's address service. When off, nothing leaves the device. Keep it off at sites of sensitive species.",
+    "Incerteza (m)" to "Uncertainty (m)",
+    "Altitude (m)" to "Elevation (m)",
+    "Incerteza da coordenada" to "Coordinate uncertainty",
+    "Raio, em metros, dentro do qual o ponto verdadeiro deve estar. O GPS do celular informa uma estimativa; corrija se usou outro receptor. As exportações guardam a coordenada em graus decimais." to "Radius, in meters, within which the true point should lie. The phone GPS gives an estimate; correct it if you used another receiver. Exports store the coordinate in decimal degrees.",
+    "Não consegui ler a coordenada. Exemplos: 22°25'51.6\"S ou 22 25 51.6 S." to "Could not read the coordinate. Examples: 22°25'51.6\"S or 22 25 51.6 S.",
+    "Graus, minutos e segundos" to "Degrees, minutes and seconds",
+    "Graus e minutos decimais" to "Degrees and decimal minutes",
+    "Digite como está no GPS de mão ou na caderneta, com N/S e L/O (ou E/W). Exemplos: 22°25'51.6\"S, 22 25 51.6 S, 44 58.74 O. O app guarda em graus decimais e exporta também como foi lido (verbatimCoordinates)." to "Type it as shown on the handheld GPS or notebook, with N/S and E/W. Examples: 22°25'51.6\"S, 22 25 51.6 S, 44 58.74 W. The app stores decimal degrees and also exports it as read (verbatimCoordinates).",
+    "Use o nome científico, se souber. Exemplo: Boana faber. O teclado não corrige este campo." to "Use the scientific name if you know it. Example: Boana faber. The keyboard does not autocorrect this field.",
+    "Ocultar campos avançados" to "Hide advanced fields",
+    "Mostrar campos avançados" to "Show advanced fields",
     "Outro" to "Other"
 )
 
@@ -3060,7 +3337,7 @@ private fun HelpCard(title: String, text: String) {
 private fun HelpButton(title: String, text: String) {
     var open by remember { mutableStateOf(false) }
     IconButton(onClick = { open = true }) {
-        Icon(Icons.Default.HelpOutline, contentDescription = "${ui("Ajuda")}: $title")
+        Icon(Icons.AutoMirrored.Filled.HelpOutline, contentDescription = "${ui("Ajuda")}: $title")
     }
     if (open) {
         AlertDialog(
@@ -3183,20 +3460,39 @@ private fun LocationFields(
     onCapture: () -> Unit
 ) {
     val isUtm = coordinateFormat == "UTM"
+    val isSexagesimal = coordinateFormat == "DMS" || coordinateFormat == "DMM"
     val invalidUtmText = ui("Coordenada UTM inválida.")
-    var utmZone by remember(coordinateFormat) { mutableStateOf("") }
-    var utmHemisphere by remember(coordinateFormat) { mutableStateOf("S") }
-    var utmEasting by remember(coordinateFormat) { mutableStateOf("") }
-    var utmNorthing by remember(coordinateFormat) { mutableStateOf("") }
+    val invalidSexagesimalText = ui("Não consegui ler a coordenada. Exemplos: 22°25'51.6\"S ou 22 25 51.6 S.")
+    var utmZone by rememberSaveable(coordinateFormat) { mutableStateOf("") }
+    var utmHemisphere by rememberSaveable(coordinateFormat) { mutableStateOf("S") }
+    var utmEasting by rememberSaveable(coordinateFormat) { mutableStateOf("") }
+    var utmNorthing by rememberSaveable(coordinateFormat) { mutableStateOf("") }
     var utmError by remember(coordinateFormat) { mutableStateOf<String?>(null) }
+    var sexLat by rememberSaveable(coordinateFormat) { mutableStateOf("") }
+    var sexLon by rememberSaveable(coordinateFormat) { mutableStateOf("") }
+    var sexError by remember(coordinateFormat) { mutableStateOf<String?>(null) }
+
+    // Par decimal que acabou de ser escrito a partir dos campos UTM/GMS. Quando
+    // lat/lon mudam por outro motivo (GPS, digitacao em graus decimais), os
+    // campos UTM/GMS sao refeitos; quando a mudanca veio deles, nao. Antes o app
+    // reescrevia o Leste/Norte enquanto a pessoa ainda digitava.
+    var pushedPair by remember { mutableStateOf<Pair<String, String>?>(null) }
+
+    fun pushDecimal(latitude: Double, longitude: Double) {
+        val latText = CoordinateUtils.roundCoordinate(latitude).toString()
+        val lonText = CoordinateUtils.roundCoordinate(longitude).toString()
+        pushedPair = latText to lonText
+        onLat(latText)
+        onLon(lonText)
+    }
 
     fun syncUtmFromDecimal() {
-        val utm = CoordinateUtils.toUtm(lat.toDoubleOrNull(), lon.toDoubleOrNull())
+        val utm = CoordinateUtils.toUtm(lat.replace(',', '.').toDoubleOrNull(), lon.replace(',', '.').toDoubleOrNull())
         if (utm != null) {
             utmZone = utm.zone.toString()
             utmHemisphere = if (utm.hemisphere == UtmHemisphere.South) "S" else "N"
-            utmEasting = String.format(Locale.US, "%.3f", utm.easting)
-            utmNorthing = String.format(Locale.US, "%.3f", utm.northing)
+            utmEasting = String.format(Locale.US, "%.1f", utm.easting)
+            utmNorthing = String.format(Locale.US, "%.1f", utm.northing)
         }
     }
 
@@ -3214,18 +3510,43 @@ private fun LocationFields(
             utmError = invalidUtmText
         } else {
             utmError = null
-            onLat(String.format(Locale.US, "%.8f", decimal.latitude))
-            onLon(String.format(Locale.US, "%.8f", decimal.longitude))
+            pushDecimal(decimal.latitude, decimal.longitude)
         }
     }
 
-    LaunchedEffect(isUtm, lat, lon) {
-        if (isUtm && lat.isNotBlank() && lon.isNotBlank()) syncUtmFromDecimal()
+    fun formatSexagesimal(value: Double, axis: Axis): String =
+        if (coordinateFormat == "DMS") CoordinateUtils.toDms(value, axis) else CoordinateUtils.toDmm(value, axis)
+
+    fun syncSexagesimalFromDecimal() {
+        lat.replace(',', '.').toDoubleOrNull()?.let { sexLat = formatSexagesimal(it, Axis.Latitude) }
+        lon.replace(',', '.').toDoubleOrNull()?.let { sexLon = formatSexagesimal(it, Axis.Longitude) }
+    }
+
+    fun syncDecimalFromSexagesimal() {
+        if (sexLat.isBlank() || sexLon.isBlank()) {
+            sexError = null
+            return
+        }
+        val latitude = CoordinateUtils.parseSexagesimal(sexLat, Axis.Latitude)
+        val longitude = CoordinateUtils.parseSexagesimal(sexLon, Axis.Longitude)
+        if (latitude == null || longitude == null) {
+            sexError = invalidSexagesimalText
+        } else {
+            sexError = null
+            pushDecimal(latitude, longitude)
+        }
+    }
+
+    LaunchedEffect(coordinateFormat, lat, lon) {
+        if (lat.isBlank() || lon.isBlank()) return@LaunchedEffect
+        if (pushedPair == (lat to lon)) return@LaunchedEffect
+        if (isUtm) syncUtmFromDecimal()
+        if (isSexagesimal) syncSexagesimalFromDecimal()
     }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(ui("Coordenadas"), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-        HelpButton("Precisão GPS", "Mostra o erro aproximado da localização em metros. Quanto menor, melhor. As exportações usam Graus Decimais.")
+        HelpButton(ui("Incerteza da coordenada"), ui("Raio, em metros, dentro do qual o ponto verdadeiro deve estar. O GPS do celular informa uma estimativa; corrija se usou outro receptor. As exportações guardam a coordenada em graus decimais."))
     }
     if (isUtm) {
         HelpCard(
@@ -3262,19 +3583,32 @@ private fun LocationFields(
         utmError?.let {
             Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextInput("Latitude DD", lat, KeyboardType.Decimal, Modifier.weight(1f), onChange = onLat)
-            TextInput("Longitude DD", lon, KeyboardType.Decimal, Modifier.weight(1f), onChange = onLon)
+    }
+    if (isSexagesimal) {
+        HelpCard(
+            if (coordinateFormat == "DMS") "Graus, minutos e segundos" else "Graus e minutos decimais",
+            "Digite como está no GPS de mão ou na caderneta, com N/S e L/O (ou E/W). Exemplos: 22°25'51.6\"S, 22 25 51.6 S, 44 58.74 O. O app guarda em graus decimais e exporta também como foi lido (verbatimCoordinates)."
+        )
+        TextInput("Latitude ($coordinateFormat)", sexLat, autoCorrect = false) {
+            sexLat = it
+            syncDecimalFromSexagesimal()
         }
-    } else {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextInput("Latitude", lat, KeyboardType.Decimal, Modifier.weight(1f), onChange = onLat)
-            TextInput("Longitude", lon, KeyboardType.Decimal, Modifier.weight(1f), onChange = onLon)
+        TextInput("Longitude ($coordinateFormat)", sexLon, autoCorrect = false) {
+            sexLon = it
+            syncDecimalFromSexagesimal()
+        }
+        sexError?.let {
+            Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
         }
     }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        TextInput("Altitude", alt, KeyboardType.Decimal, Modifier.weight(1f), onChange = onAlt)
-        TextInput("Precisão (m)", accuracy, KeyboardType.Decimal, Modifier.weight(1f), help = "Erro aproximado da localização em metros. Quanto menor, melhor.", onChange = onAccuracy)
+        val suffix = if (isUtm || isSexagesimal) " DD" else ""
+        TextInput("Latitude$suffix", lat, KeyboardType.Decimal, Modifier.weight(1f), onChange = onLat)
+        TextInput("Longitude$suffix", lon, KeyboardType.Decimal, Modifier.weight(1f), onChange = onLon)
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        TextInput("Altitude (m)", alt, KeyboardType.Decimal, Modifier.weight(1f), onChange = onAlt)
+        TextInput("Incerteza (m)", accuracy, KeyboardType.Decimal, Modifier.weight(1f), onChange = onAccuracy)
     }
     OutlinedButton(onClick = onCapture) {
         Icon(Icons.Default.GpsFixed, null)
@@ -3291,18 +3625,27 @@ private fun TextInput(
     modifier: Modifier = Modifier.fillMaxWidth(),
     minLines: Int = 1,
     help: String? = null,
+    autoCorrect: Boolean = true,
+    capitalization: KeyboardCapitalization = if (autoCorrect) KeyboardCapitalization.Sentences else KeyboardCapitalization.None,
     onChange: (String) -> Unit
 ) {
     Column(modifier) {
         val displayLabel = ui(label)
         val displayHelp = help?.let { ui(it) }
+        val numeric = keyboardType == KeyboardType.Number || keyboardType == KeyboardType.Decimal
         OutlinedTextField(
             value = value,
             onValueChange = onChange,
             label = { Text(displayLabel) },
             modifier = Modifier.fillMaxWidth(),
             minLines = minLines,
-            keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+            // Campo curto e de uma linha: o Enter nao insere quebra em nome ou ID.
+            singleLine = minLines == 1,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = keyboardType,
+                autoCorrectEnabled = autoCorrect && !numeric && keyboardType != KeyboardType.Uri,
+                capitalization = if (numeric || keyboardType == KeyboardType.Uri) KeyboardCapitalization.None else capitalization
+            ),
             trailingIcon = { if (displayHelp != null) HelpButton(displayLabel, displayHelp) }
         )
         if (displayHelp != null) {
@@ -3366,7 +3709,7 @@ private fun normalizeDateInput(value: String): String? {
         "nov" to 11, "novembro" to 11,
         "dez" to 12, "dezembro" to 12
     )
-    val text = Regex("""^(\d{1,2})\s+([A-Za-zÀ-ÿ]{3,})\.?\s+(\d{4})$""").matchEntire(trimmed.lowercase(Locale("pt", "BR")))
+    val text = Regex("""^(\d{1,2})\s+([A-Za-zÀ-ÿ]{3,})\.?\s+(\d{4})$""").matchEntire(trimmed.lowercase(Locale.forLanguageTag("pt-BR")))
     if (text != null) {
         val (day, monthText, year) = text.destructured
         val month = ptMonths[monthText.removeSuffix(".")]
@@ -3403,7 +3746,6 @@ private fun TimeInput(label: String, value: String, onChange: (String) -> Unit) 
     }
 }
 
-@Composable
 /**
  * Campo de vocabulario controlado do Darwin Core.
  *
@@ -3558,6 +3900,7 @@ private fun dwcValueLabel(value: String): String = when (value) {
     else -> value
 }
 
+@Composable
 private fun ChipRow(title: String, options: List<Pair<String, String>>, selected: String, onSelected: (String) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(ui(title), style = MaterialTheme.typography.labelLarge)
@@ -3573,7 +3916,7 @@ private fun ChipRow(title: String, options: List<Pair<String, String>>, selected
 }
 
 @Composable
-private fun AdvancedOccurrenceSections(formType: String, values: MutableMap<String, String>, fields: List<FieldConfigEntity>) {
+private fun AdvancedOccurrenceSections(formType: String, values: DynamicValues, fields: List<FieldConfigEntity>) {
     Text(ui("Seções avançadas"), style = MaterialTheme.typography.titleLarge)
     HelpCard("Modo avançado opcional", "Preencha apenas o que fizer sentido. Campos morfológicos, ambientais e medidas podem sair como MeasurementOrFact nas exportações futuras.")
     val availableGroups = buildList {
@@ -3613,6 +3956,13 @@ private fun advancedGroupDisplayName(group: String): String = when (group) {
     "Fungo" -> "Funga"
     else -> group
 }
+
+/** Ordem dos grupos na tela de campos: do essencial ao especializado. */
+private val fieldGroupOrder = listOf(
+    "Básicos", "Localização", "Ocorrência", "Identificação", "Taxonomia", "Amostragem", "Ambiente",
+    "Anotações", "Mídia", "Fauna", "Flora", "Funga", "Vestígios", "Coleção", "Ecologia",
+    "Georreferenciamento", "Autoria", "MeasurementOrFact"
+)
 
 private fun fieldGroupDisplayName(group: String): String = when (group) {
     "Botanica" -> "Flora"
@@ -3685,7 +4035,7 @@ private fun AdvancedGroupSelector(groups: List<String>, selectedGroup: String, o
 }
 
 @Composable
-private fun AdvancedFieldGroup(title: String, description: String, fields: List<Pair<String, String>>, values: MutableMap<String, String>) {
+private fun AdvancedFieldGroup(title: String, description: String, fields: List<Pair<String, String>>, values: DynamicValues) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(ui(title), style = MaterialTheme.typography.titleMedium)
@@ -3699,7 +4049,22 @@ private fun AdvancedFieldGroup(title: String, description: String, fields: List<
                     "cap" -> "CAP em centímetros. Ao preencher, o app calcula DAP = CAP / pi."
                     else -> null
                 }
-                TextInput(label, values[key].orEmpty(), help = help) {
+                // Teclado conforme o tipo declarado no catalogo: antes DAP, CAP,
+                // alturas e temperatura abriam teclado de texto.
+                val definition = DarwinCoreCatalog.byTerm[key]
+                val keyboard = when (definition?.type) {
+                    "decimal" -> KeyboardType.Decimal
+                    "integer" -> KeyboardType.Number
+                    else -> KeyboardType.Text
+                }
+                TextInput(
+                    label,
+                    values[key],
+                    keyboard,
+                    minLines = if (definition?.type == "long_text") 3 else 1,
+                    help = help,
+                    autoCorrect = key !in DarwinCoreCatalog.noAutocorrectTerms
+                ) {
                     values[key] = it
                     if (title == "Planta") updateBotanicalDiameterPair(key, it, values)
                 }
@@ -3712,7 +4077,15 @@ private fun AdvancedFieldGroup(title: String, description: String, fields: List<
 private fun configuredAdvancedFields(defaults: List<Pair<String, String>>, fields: List<FieldConfigEntity>): List<Pair<String, String>> =
     defaults.filter { (key, _) -> enabled(key, fields) }.map { (key, fallback) -> key to label(key, fields, fallback) }
 
-private fun updateBotanicalDiameterPair(key: String, value: String, values: MutableMap<String, String>) {
+private fun updateBotanicalDiameterPair(key: String, value: String, values: DynamicValues) {
+    // Campo apagado apaga o par calculado, para nao sobrar um CAP de um DAP que nao existe mais.
+    if (value.isBlank()) {
+        when (key) {
+            "dbh" -> values["cap"] = ""
+            "cap" -> values["dbh"] = ""
+        }
+        return
+    }
     val numeric = value.replace(',', '.').toDoubleOrNull() ?: return
     when (key) {
         "dbh" -> values["cap"] = formatBotanicalMeasure(numeric * Math.PI)
@@ -3917,6 +4290,14 @@ private val fixedOccurrenceTerms = setOf(
     "associatedMedia"
 )
 
+/**
+ * Termos que o formulario ja mostra no bloco principal e que nao estao em
+ * [fixedOccurrenceTerms]. Sem esta lista eles apareciam de novo em "campos
+ * extras": basisOfRecord tinha dois controles, e o segundo, gravado no JSON
+ * dinamico, sobrescrevia o primeiro na exportacao.
+ */
+private val formOwnedTerms = setOf("occurrenceID", "recordNumber", "basisOfRecord", "fieldNotes")
+
 private data class MediaOccurrenceName(
     val occurrenceID: String = "",
     val scientificName: String = "",
@@ -3984,69 +4365,6 @@ private fun asciiWords(value: String): List<String> =
         .split(Regex("\\s+"))
         .filter { it.isNotBlank() && it !in setOf("DE", "DA", "DO", "DAS", "DOS", "E", "A", "O") }
 
-private fun mediaEntity(projectId: Long, sessionId: Long, occurrenceId: Long?, type: String, file: File, mimeType: String, subject: String = "", description: String = "", metadata: PhotoMetadata? = null): MediaEntity =
-    MediaEntity(
-        projectId = projectId,
-        sessionId = sessionId,
-        occurrenceId = occurrenceId,
-        mediaType = type,
-        filePath = file.absolutePath,
-        fileName = file.name,
-        mimeType = mimeType,
-        createdAt = metadata?.capturedAt ?: System.currentTimeMillis(),
-        latitude = metadata?.latitude,
-        longitude = metadata?.longitude,
-        caption = description,
-        mediaSubject = subject,
-        bodyPartOrPlantPart = subject,
-        behaviorContext = subject,
-        notes = description
-    )
-
-private data class PhotoMetadata(
-    val capturedAt: Long? = null,
-    val latitude: Double? = null,
-    val longitude: Double? = null
-)
-
-private fun readPhotoMetadata(file: File): PhotoMetadata {
-    if (!file.exists()) return PhotoMetadata()
-    return runCatching {
-        val exif = ExifInterface(file.absolutePath)
-        val latLong = FloatArray(2)
-        val hasLatLong = exif.getLatLong(latLong)
-        val capturedAt = listOf(
-            ExifInterface.TAG_DATETIME_ORIGINAL,
-            ExifInterface.TAG_DATETIME_DIGITIZED,
-            ExifInterface.TAG_DATETIME
-        ).firstNotNullOfOrNull { tag ->
-            exif.getAttribute(tag)?.let { value ->
-                runCatching {
-                    SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).parse(value)?.time
-                }.getOrNull()
-            }
-        }
-        PhotoMetadata(
-            capturedAt = capturedAt ?: file.lastModified().takeIf { it > 0L },
-            latitude = if (hasLatLong) latLong[0].toDouble() else null,
-            longitude = if (hasLatLong) latLong[1].toDouble() else null
-        )
-    }.getOrDefault(PhotoMetadata(capturedAt = file.lastModified().takeIf { it > 0L }))
-}
-
-@SuppressLint("MissingPermission")
-private fun startAudioRecorder(
-    audioFormat: String,
-    file: File,
-    mp3Recorder: PureMp3AudioRecorder,
-    wavRecorder: WavAudioRecorder
-) {
-    if (audioFormat == "mp3") {
-        mp3Recorder.start(file)
-    } else {
-        wavRecorder.start(file)
-    }
-}
 
 private fun decodeThumbnail(path: String, targetSize: Int): android.graphics.Bitmap? =
     runCatching {

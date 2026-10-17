@@ -8,12 +8,16 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import android.text.format.DateFormat
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import com.oikos.fieldbook.util.CoordinateUtils
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
@@ -56,6 +60,7 @@ class TrackRecordingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        runningTrackId = null
         stopLocationUpdates()
         releaseWakeLock()
         scope.cancel()
@@ -64,11 +69,25 @@ class TrackRecordingService : Service() {
 
     @SuppressLint("MissingPermission")
     private fun startRecording(trackId: Long) {
-        startForeground(NOTIFICATION_ID, notification("Trilha GPS ativa. Gravando mesmo com a tela bloqueada."))
-        if (!hasLocationPermission()) {
-            stopSelf()
+        // O servico precisa entrar em primeiro plano logo apos o
+        // startForegroundService, mas no Android 14+ declarar o tipo location
+        // sem a permissao lanca SecurityException e derruba o app. Sem
+        // permissao: entra em primeiro plano sem tipo e encerra em seguida.
+        val started = runCatching {
+            if (!hasLocationPermission()) error("sem permissão de localização")
+            ServiceCompat.startForeground(
+                this,
+                NOTIFICATION_ID,
+                notification("Trilha GPS ativa. Gravando mesmo com a tela bloqueada."),
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0
+            )
+        }.isSuccess
+        if (!started) {
+            runCatching { startForeground(NOTIFICATION_ID, notification("Trilha GPS interrompida: permissão de localização ausente.")) }
+            stopRecording()
             return
         }
+        runningTrackId = trackId
         acquireWakeLock()
         stopLocationUpdates()
         client.lastLocation.addOnSuccessListener { location ->
@@ -96,7 +115,7 @@ class TrackRecordingService : Service() {
         if (!track.active) return
 
         val timestamp = location.time.takeIf { it > 0L } ?: System.currentTimeMillis()
-        val accuracy = if (location.hasAccuracy()) location.accuracy.toDouble() else null
+        val accuracy = if (location.hasAccuracy()) CoordinateUtils.roundUncertainty(location.accuracy.toDouble()) else null
         val previous = repository.getLastTrackPoint(trackId)
         val decision = TrackPointRules.decide(previous, location.latitude, location.longitude, accuracy, timestamp)
         if (!decision.accepted) return
@@ -104,9 +123,9 @@ class TrackRecordingService : Service() {
         repository.addTrackPoint(
             GpsTrackPointEntity(
                 trackId = trackId,
-                latitude = location.latitude,
-                longitude = location.longitude,
-                altitude = if (location.hasAltitude()) location.altitude else null,
+                latitude = CoordinateUtils.roundCoordinate(location.latitude),
+                longitude = CoordinateUtils.roundCoordinate(location.longitude),
+                altitude = if (location.hasAltitude()) CoordinateUtils.roundAltitude(location.altitude) else null,
                 accuracy = accuracy,
                 timestamp = timestamp,
                 speed = if (location.hasSpeed()) location.speed.toDouble() else null
@@ -130,6 +149,7 @@ class TrackRecordingService : Service() {
     }
 
     private fun stopRecording() {
+        runningTrackId = null
         stopLocationUpdates()
         releaseWakeLock()
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -185,6 +205,15 @@ class TrackRecordingService : Service() {
             .build()
 
     companion object {
+        /**
+         * Trilha sendo gravada neste processo, ou null. Permite ao app saber se
+         * uma trilha marcada como ativa no banco perdeu o servico (app fechado a
+         * forca, aparelho reiniciado) e retoma-la.
+         */
+        @Volatile
+        var runningTrackId: Long? = null
+            private set
+
         const val ACTION_START = "com.oikos.fieldbook.START_TRACK"
         const val ACTION_STOP = "com.oikos.fieldbook.STOP_TRACK"
         const val EXTRA_TRACK_ID = "trackId"

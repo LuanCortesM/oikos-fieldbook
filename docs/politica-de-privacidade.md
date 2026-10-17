@@ -1,6 +1,6 @@
 # Política de Privacidade — Oikos FieldBook
 
-Última atualização: 19 de setembro de 2026
+Última atualização: 17 de outubro de 2026
 Responsável: Luan da Silva Cortes Maciel (MACIEL, L. S. C.)
 Contato: herpetomantiqueira@gmail.com
 
@@ -32,26 +32,31 @@ enviar o arquivo (e-mail, Google Drive, WhatsApp, armazenamento local etc.).
   funcionando com a tela apagada, durante a expedição.
 - **Notificações**: exibir o aviso permanente enquanto a trilha está sendo
   gravada, como o Android exige.
-- **Internet e estado da rede**: exclusivamente para baixar as imagens de mapa,
-  conforme a seção seguinte.
+- **Internet e estado da rede**: para baixar as imagens de mapa e, se você
+  ligar a opção, sugerir município e estado, conforme a seção seguinte.
 
 ## Uso de internet
 
-O aplicativo faz requisições de rede em um único caso: baixar as imagens
-(*tiles*) do mapa, servidas pelo OpenStreetMap, quando você abre a tela de mapa.
+O aplicativo faz requisições de rede em dois casos:
 
-Nessa requisição, o servidor do OpenStreetMap recebe as coordenadas da área
-visualizada, como acontece em qualquer aplicativo de mapas. Isso significa que,
-ao abrir o mapa em campo, a região aproximada do seu ponto de coleta chega a um
-terceiro.
+1. **Mapa.** Baixar as imagens (*tiles*) do mapa, servidas pelo OpenStreetMap,
+   quando você abre a tela de mapa. Nessa requisição, o servidor do
+   OpenStreetMap recebe a área visualizada, como em qualquer aplicativo de
+   mapas. Ao abrir o mapa em campo, a região aproximada do seu ponto de coleta
+   chega a um terceiro.
+2. **Sugestão de município e estado (opcional, desligada por padrão).** Se você
+   ligar "Sugerir município e estado pelo GPS" em Configurações, a coordenada
+   capturada é enviada ao serviço de endereços do Google (Geocoder do Android)
+   para preencher município, estado e país. Com a opção desligada, nada é
+   enviado.
 
 Nenhum dado de ocorrência, fotografia, áudio, anotação ou identificação é
-enviado junto — o servidor recebe apenas a área do mapa pedida.
+enviado em nenhum dos dois casos.
 
 **Se o local de coleta for sensível** (espécie ameaçada, população pequena, área
-sob pressão de coleta ilegal), mantenha o aparelho sem rede ou não abra a tela
-de mapa em campo. A coleta e o salvamento dos registros continuam funcionando
-normalmente sem internet.
+sob pressão de coleta ilegal), mantenha a sugestão de município desligada e não
+abra a tela de mapa em campo. A coleta e o salvamento dos registros continuam
+funcionando normalmente sem internet.
 
 O aplicativo não usa serviços de análise, rastreamento, publicidade ou
 identificadores de anúncio.

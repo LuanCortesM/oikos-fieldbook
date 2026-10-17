@@ -2,7 +2,6 @@ package com.oikos.fieldbook.util
 
 import java.util.Locale
 import kotlin.math.abs
-import kotlin.math.floor
 import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.cos
@@ -18,6 +17,63 @@ object CoordinateUtils {
 
     fun validLatitude(value: Double?): Boolean = value == null || value in -90.0..90.0
     fun validLongitude(value: Double?): Boolean = value == null || value in -180.0..180.0
+
+    /**
+     * Arredondamentos da leitura do GPS.
+     *
+     * O receptor devolve float convertido para double, e o ruido da conversao
+     * virava "12.302000045776367 m" de incerteza na exportacao: falsa precisao,
+     * contra o que as boas praticas de georreferenciamento do GBIF recomendam.
+     * Coordenada com 7 casas (~1 cm, abaixo de qualquer GNSS de celular),
+     * incerteza arredondada para cima em metro inteiro (nunca subestima o erro)
+     * e altitude com 1 casa.
+     */
+    fun roundCoordinate(value: Double): Double = Math.round(value * 1e7) / 1e7
+    fun roundUncertainty(value: Double?): Double? = value?.let { kotlin.math.ceil(it - 1e-9).coerceAtLeast(1.0) }
+    fun roundAltitude(value: Double?): Double? = value?.let { Math.round(it * 10.0) / 10.0 }
+
+    /**
+     * Le coordenada em graus/minutos/segundos ou graus e minutos decimais,
+     * como se anota em caderneta ou se le em GPS de mao:
+     * 22°25'51.6"S, 22 25 51.6 S, S 22 25.86, -22 25.86, 44°58'44"O.
+     * Aceita N/S/E/W e tambem L (leste) e O (oeste). Virgula decimal tambem.
+     */
+    fun parseSexagesimal(text: String, axis: Axis): Double? {
+        val raw = text.trim().uppercase(Locale.ROOT).replace(',', '.')
+        if (raw.isBlank()) return null
+        val hemisphere = Regex("[NSEWLO]").findAll(raw).map { it.value }.toList()
+        if (hemisphere.size > 1) return null
+        val letter = hemisphere.firstOrNull()
+        val validLetters = if (axis == Axis.Latitude) setOf("N", "S") else setOf("E", "W", "L", "O")
+        if (letter != null && letter !in validLetters) return null
+        val negative = raw.trimStart().startsWith("-") || letter in setOf("S", "W", "O")
+        val numbers = Regex("\\d+(?:\\.\\d+)?").findAll(raw).map { it.value.toDouble() }.toList()
+        if (numbers.isEmpty() || numbers.size > 3) return null
+        val degrees = numbers[0]
+        val minutes = numbers.getOrElse(1) { 0.0 }
+        val seconds = numbers.getOrElse(2) { 0.0 }
+        if (minutes >= 60.0 || seconds >= 60.0) return null
+        if (numbers.size > 1 && degrees % 1.0 != 0.0) return null
+        if (numbers.size > 2 && minutes % 1.0 != 0.0) return null
+        val value = degrees + minutes / 60.0 + seconds / 3600.0
+        val limit = if (axis == Axis.Latitude) 90.0 else 180.0
+        if (value > limit) return null
+        return roundCoordinate(if (negative) -value else value)
+    }
+
+    /**
+     * Coordenada como apresentada no formato escolhido pelo projeto, para
+     * dwc:verbatimCoordinates. Devolve o par e o nome do sistema conforme os
+     * exemplos de dwc:verbatimCoordinateSystem.
+     */
+    fun verbatim(latitude: Double?, longitude: Double?, format: String): Pair<String, String>? {
+        if (latitude == null || longitude == null) return null
+        return when (format) {
+            "DMS" -> "${toDms(latitude, Axis.Latitude)} ${toDms(longitude, Axis.Longitude)}" to "degrees minutes seconds"
+            "DMM" -> "${toDmm(latitude, Axis.Latitude)} ${toDmm(longitude, Axis.Longitude)}" to "degrees decimal minutes"
+            else -> null
+        }
+    }
 
     fun format(value: Double?, axis: Axis, format: String): String {
         if (value == null) return ""
@@ -95,21 +151,22 @@ object CoordinateUtils {
         return if (validLatitude(result.latitude) && validLongitude(result.longitude)) result else null
     }
 
-    private fun toDms(value: Double, axis: Axis): String {
+    // Arredonda no total (centesimos de segundo / milesimos de minuto) antes de
+    // separar as partes; senao 59.996" vira "60.00" e o minuto nao sobe.
+    fun toDms(value: Double, axis: Axis): String {
         val hemisphere = hemisphere(value, axis)
-        val absolute = abs(value)
-        val degrees = floor(absolute).toInt()
-        val minutesFloat = (absolute - degrees) * 60.0
-        val minutes = floor(minutesFloat).toInt()
-        val seconds = (minutesFloat - minutes) * 60.0
+        val centiseconds = Math.round(abs(value) * 360_000.0)
+        val degrees = centiseconds / 360_000
+        val minutes = (centiseconds % 360_000) / 6_000
+        val seconds = (centiseconds % 6_000) / 100.0
         return String.format(Locale.US, "%d°%02d'%05.2f\"%s", degrees, minutes, seconds, hemisphere)
     }
 
-    private fun toDmm(value: Double, axis: Axis): String {
+    fun toDmm(value: Double, axis: Axis): String {
         val hemisphere = hemisphere(value, axis)
-        val absolute = abs(value)
-        val degrees = floor(absolute).toInt()
-        val minutes = (absolute - degrees) * 60.0
+        val hundredThousandthMinutes = Math.round(abs(value) * 6_000_000.0)
+        val degrees = hundredThousandthMinutes / 6_000_000
+        val minutes = (hundredThousandthMinutes % 6_000_000) / 100_000.0
         return String.format(Locale.US, "%d°%08.5f'%s", degrees, minutes, hemisphere)
     }
 

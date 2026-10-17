@@ -132,22 +132,22 @@ object DarwinCoreCatalog {
         DarwinCoreField("recordType", "Tipo de registro", "Record type", "Fauna", enabled = true, order = 101),
         DarwinCoreField("activity", "Atividade", "Activity", "Fauna", enabled = true, order = 102),
         DarwinCoreField("microhabitat", "Microhabitat", "Microhabitat", "Fauna", enabled = true, order = 103),
-        DarwinCoreField("heightAboveGround", "Altura em relação ao solo", "Height above ground", "Fauna", "decimal", enabled = false, order = 104),
-        DarwinCoreField("distanceToWater", "Distância da água", "Distance to water", "Fauna", "decimal", enabled = false, order = 105),
-        DarwinCoreField("airTemperature", "Temperatura do ar", "Air temperature", "Fauna", "decimal", enabled = false, order = 106),
-        DarwinCoreField("humidity", "Umidade", "Humidity", "Fauna", "decimal", enabled = false, order = 107),
+        DarwinCoreField("heightAboveGround", "Altura em relação ao solo (m)", "Height above ground (m)", "Fauna", "decimal", enabled = false, order = 104, unit = "m"),
+        DarwinCoreField("distanceToWater", "Distância da água (m)", "Distance to water (m)", "Fauna", "decimal", enabled = false, order = 105, unit = "m"),
+        DarwinCoreField("airTemperature", "Temperatura do ar (°C)", "Air temperature (°C)", "Fauna", "decimal", enabled = false, order = 106, unit = "°C"),
+        DarwinCoreField("humidity", "Umidade relativa (%)", "Relative humidity (%)", "Fauna", "decimal", enabled = false, order = 107, unit = "%"),
         DarwinCoreField("vocalizationPresent", "Vocalização presente", "Vocalization present", "Fauna", enabled = false, order = 108),
         DarwinCoreField("vocalizationType", "Tipo de vocalização", "Vocalization type", "Fauna", enabled = false, order = 109),
         DarwinCoreField("vocalizationContext", "Contexto da vocalização", "Vocalization context", "Fauna", enabled = false, order = 110),
-        DarwinCoreField("callingIndividuals", "Indivíduos vocalizando", "Calling individuals", "Fauna", "integer", enabled = false, order = 111),
+        DarwinCoreField("callingIndividuals", "Indivíduos vocalizando", "Calling individuals", "Fauna", "integer", enabled = false, order = 111, unit = "individuals"),
         DarwinCoreField("audioQuality", "Qualidade do áudio", "Audio quality", "Fauna", enabled = false, order = 112),
         DarwinCoreField("backgroundNoise", "Ruído de fundo", "Background noise", "Fauna", enabled = false, order = 113),
         DarwinCoreField("behaviorNotes", "Observações comportamentais", "Behavior notes", "Fauna", "long_text", enabled = false, order = 114),
 
         DarwinCoreField("plantHabit", "Hábito", "Plant habit", "Botanica", enabled = true, order = 130),
-        DarwinCoreField("estimatedHeight", "Altura estimada", "Estimated height", "Botanica", "decimal", enabled = true, order = 131),
-        DarwinCoreField("dbh", "DAP", "DBH", "Botanica", "decimal", enabled = true, order = 132),
-        DarwinCoreField("cap", "CAP", "CBH", "Botanica", "decimal", enabled = true, order = 133),
+        DarwinCoreField("estimatedHeight", "Altura estimada (m)", "Estimated height (m)", "Botanica", "decimal", enabled = true, order = 131, unit = "m"),
+        DarwinCoreField("dbh", "DAP (cm)", "DBH (cm)", "Botanica", "decimal", enabled = true, order = 132, unit = "cm"),
+        DarwinCoreField("cap", "CAP (cm)", "CBH (cm)", "Botanica", "decimal", enabled = true, order = 133, unit = "cm"),
         DarwinCoreField("flowerPresent", "Presença de flor", "Flower present", "Botanica", enabled = true, order = 134),
         DarwinCoreField("fruitPresent", "Presença de fruto", "Fruit present", "Botanica", enabled = true, order = 135),
         DarwinCoreField("phenologicalState", "Estado fenológico", "Phenological state", "Botanica", enabled = true, order = 136),
@@ -177,8 +177,8 @@ object DarwinCoreCatalog {
         DarwinCoreField("fruitingBodyPresent", "Corpo de frutificação presente", "Fruiting body present", "Fungos", enabled = true, order = 191),
         DarwinCoreField("fruitingBodyColor", "Cor do corpo de frutificação", "Fruiting body color", "Fungos", enabled = true, order = 192),
         DarwinCoreField("fruitingBodyShape", "Forma do corpo de frutificação", "Fruiting body shape", "Fungos", enabled = false, order = 193),
-        DarwinCoreField("capDiameter", "Diâmetro do píleo/chapéu", "Cap diameter", "Fungos", "decimal", enabled = false, order = 194),
-        DarwinCoreField("stipeLength", "Comprimento do estipe", "Stipe length", "Fungos", "decimal", enabled = false, order = 195),
+        DarwinCoreField("capDiameter", "Diâmetro do píleo/chapéu (cm)", "Cap diameter (cm)", "Fungos", "decimal", enabled = false, order = 194, unit = "cm"),
+        DarwinCoreField("stipeLength", "Comprimento do estipe (cm)", "Stipe length (cm)", "Fungos", "decimal", enabled = false, order = 195, unit = "cm"),
         DarwinCoreField("gillOrPoreType", "Lamelas, poros ou superfície fértil", "Gill, pore or fertile surface", "Fungos", enabled = false, order = 196),
         DarwinCoreField("sporePrintColor", "Cor da esporada", "Spore print color", "Fungos", enabled = false, order = 197),
         DarwinCoreField("hostOrAssociation", "Hospedeiro ou associação", "Host or association", "Fungos", enabled = false, order = 198),
@@ -275,6 +275,36 @@ object DarwinCoreCatalog {
      * linhas da extensao MeasurementOrFact.
      */
     val customTerms: Set<String> = advancedOccurrenceFields.map { it.term }.toSet()
+
+    /** Termos da classe MeasurementOrFact: nunca sao coluna do core Occurrence. */
+    val measurementTerms: Set<String> = setOf(
+        "measurementType", "measurementValue", "measurementUnit", "measurementMethod",
+        "measurementDeterminedBy", "measurementDeterminedDate", "measurementAccuracy"
+    )
+
+    /**
+     * Tudo que nao pode ser coluna do core do Darwin Core Archive: termos
+     * proprios do Oikos, "substrate" (nao existe no Darwin Core) e os termos de
+     * MeasurementOrFact. Antes "substrate" e "measurementType" iam para o core
+     * com uma URI dwc que nao existe.
+     */
+    val nonCoreTerms: Set<String> = customTerms + setOf("substrate") + measurementTerms
+
+    /**
+     * Nomes cientificos e identificadores: o teclado nao pode corrigir. No
+     * Android 8 com Gboard, "Boana faber" virou "Bianca faber" sem aviso e foi
+     * exportado assim.
+     */
+    val noAutocorrectTerms: Set<String> = setOf(
+        "scientificName", "scientificNameAuthorship", "genus", "specificEpithet",
+        "infraspecificEpithet", "family", "order", "class", "phylum", "kingdom",
+        "higherClassification", "verbatimIdentification", "associatedTaxa",
+        "probableSpecies", "identificationHypothesis", "hostOrAssociation",
+        "occurrenceID", "recordNumber", "fieldNumber", "catalogNumber",
+        "otherCatalogNumbers", "institutionCode", "collectionCode", "organismID",
+        "recordedByID", "identifiedByID", "associatedSequences", "associatedOccurrences",
+        "verbatimCoordinates", "verbatimSRS", "countryCode"
+    )
 
     /** Indice termo -> definicao, para consulta rapida no formulario e no exportador. */
     val byTerm: Map<String, DarwinCoreField> = allFields.associateBy { it.term }

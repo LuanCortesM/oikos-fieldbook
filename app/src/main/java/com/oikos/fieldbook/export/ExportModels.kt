@@ -26,9 +26,8 @@ enum class ExportFormat(val extension: String, val mimeType: String) {
 }
 
 data class ExportResult(
-    val fileName: String,
+    val file: java.io.File,
     val mimeType: String,
-    val bytes: ByteArray,
     val warning: String? = null
 )
 

@@ -13,6 +13,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileOutputStream
+import java.io.OutputStream
 import java.nio.charset.StandardCharsets
 import java.text.Normalizer
 import java.time.LocalDate
@@ -23,6 +25,14 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 class OikosExporter {
+    /**
+     * Gera a exportacao direto no arquivo devolvido por [destination].
+     *
+     * Ate a v0.2.0 o ZIP inteiro, com todas as fotos e audios, era montado num
+     * ByteArray na memoria e na thread principal: com audio WAV (~5 MB/min) um
+     * projeto real estourava a memoria de aparelhos modestos. Agora as midias
+     * sao copiadas em fluxo para o arquivo, e o chamador roda fora da main thread.
+     */
     fun export(
         format: ExportFormat,
         project: ProjectEntity,
@@ -32,32 +42,32 @@ class OikosExporter {
         fields: List<FieldConfigEntity>,
         tracks: List<TrackExportBundle> = emptyList(),
         content: ExportContent = ExportContent.SpreadsheetsAndAllMedia,
-        fileStem: String = safeName(project.name)
+        fileStem: String = safeName(project.name),
+        destination: (String) -> File
     ): ExportResult {
         val packageModel = ExportPackage(project, sessions, occurrences, media, fields, tracks, content)
-        val warnings = packageModel.validationWarnings()
-        val bytes = when (format) {
-            ExportFormat.Csv -> if (content == ExportContent.MediaOnly) {
-                packageModel.mediaCsv().toByteArray(StandardCharsets.UTF_8)
-            } else {
-                packageModel.occurrencesCsv().toByteArray(StandardCharsets.UTF_8)
-            }
-            ExportFormat.Xlsx -> packageModel.xlsx()
-            ExportFormat.Json -> if (content == ExportContent.MediaOnly) {
-                packageModel.mediaJson().toByteArray(StandardCharsets.UTF_8)
-            } else {
-                packageModel.hierarchicalJson().toByteArray(StandardCharsets.UTF_8)
-            }
-            ExportFormat.GeoJson -> packageModel.geoJson().toByteArray(StandardCharsets.UTF_8)
-            ExportFormat.Zip -> packageModel.zipBytes()
-            ExportFormat.DwcArchive -> packageModel.dwcArchiveBytes()
-        }
+        val warnings = packageModel.validationWarnings(format)
         val stem = when (format) {
             ExportFormat.Zip -> "${fileStem}_${LocalDate.now()}"
             ExportFormat.DwcArchive -> "${fileStem}_dwca_${LocalDate.now()}"
             else -> fileStem
         }
-        return ExportResult("$stem.${format.extension}", format.mimeType, bytes, warnings.takeIf { it.isNotBlank() })
+        val file = destination("$stem.${format.extension}")
+        when (format) {
+            ExportFormat.Csv -> file.writeText(
+                if (content == ExportContent.MediaOnly) packageModel.mediaCsv() else packageModel.occurrencesCsv(),
+                StandardCharsets.UTF_8
+            )
+            ExportFormat.Xlsx -> file.writeBytes(packageModel.xlsx())
+            ExportFormat.Json -> file.writeText(
+                if (content == ExportContent.MediaOnly) packageModel.mediaJson() else packageModel.hierarchicalJson(),
+                StandardCharsets.UTF_8
+            )
+            ExportFormat.GeoJson -> file.writeText(packageModel.geoJson(), StandardCharsets.UTF_8)
+            ExportFormat.Zip -> FileOutputStream(file).buffered().use { packageModel.zipTo(it) }
+            ExportFormat.DwcArchive -> file.writeBytes(packageModel.dwcArchiveBytes())
+        }
+        return ExportResult(file, format.mimeType, warnings.takeIf { it.isNotBlank() })
     }
 
     companion object {
@@ -119,7 +129,7 @@ private class ExportPackage(
                 "timestamp" to millis(point.timestamp),
                 "speed" to decimal(point.speed),
                 "geodeticDatum" to track.geodeticDatum
-            ).withUtm(point.latitude, point.longitude, track.geodeticDatum)
+            ).withVerbatim(point.latitude, point.longitude, track.geodeticDatum)
         }
     })
 
@@ -162,7 +172,7 @@ private class ExportPackage(
                 .put("mediaCount", links.size)
                 .put("photoCount", links.count { it.type == "photo" })
                 .put("audioCount", links.count { it.type == "audio" })
-            linkedMapOf<String, String>().withUtm(occurrence.latitude, occurrence.longitude, occurrence.geodeticDatum)
+            linkedMapOf<String, String>().withVerbatim(occurrence.latitude, occurrence.longitude, occurrence.geodeticDatum)
                 .forEach { (key, value) -> properties.put(key, value) }
             val geometry = JSONObject()
                 .put("type", "Point")
@@ -231,9 +241,8 @@ private class ExportPackage(
         return XlsxWriter.write(sheets)
     }
 
-    fun zipBytes(): ByteArray {
+    fun zipTo(output: OutputStream) {
         val root = "Projeto_${OikosExporter.safeName(project.name)}"
-        val output = ByteArrayOutputStream()
         ZipOutputStream(output).use { zip ->
             zip.put("$root/README.txt", readme())
             zip.put("$root/manifest.json", manifestJson())
@@ -251,12 +260,16 @@ private class ExportPackage(
                 // Pacote pronto para IPT/GBIF/SiBBr, dentro do ZIP completo.
                 zip.put("$root/04_darwin_core_archive/dwca.zip", dwcArchiveBytes())
             }
+            // Copia em fluxo: nenhum arquivo de midia passa inteiro pela memoria.
             mediaLinks.forEach { link ->
                 val source = File(link.sourcePath)
-                if (source.exists()) zip.putBytes("$root/${link.relativePath}", source.readBytes())
+                if (source.exists()) {
+                    zip.putNextEntry(ZipEntry("$root/${link.relativePath}"))
+                    source.inputStream().use { it.copyTo(zip) }
+                    zip.closeEntry()
+                }
             }
         }
-        return output.toByteArray()
     }
 
     /**
@@ -270,16 +283,20 @@ private class ExportPackage(
     fun dwcArchiveBytes(): ByteArray {
         val auxiliares = setOf("utmZone", "utmHemisphere", "utmEasting", "utmNorthing")
         val cabecalhoCore = occurrenceHeaders()
-            .filterNot { it in DarwinCoreCatalog.customTerms }
+            .filterNot { it in DarwinCoreCatalog.nonCoreTerms }
             .filterNot { it in auxiliares }
         val linhasCore = occurrences.map { occurrence ->
             occurrenceMap(sessionById[occurrence.sessionId], occurrence, linksByOccurrence[occurrence.id].orEmpty())
         }
 
         // Tudo que ficou de fora do core e tem valor vira MeasurementOrFact.
+        // Os campos measurement* preenchidos na ocorrencia formam uma linha propria.
         val linhasMof = occurrences.flatMap { occurrence ->
-            parseFlatJsonMap(occurrence.dynamicFieldsJson)
-                .filter { (termo, valor) -> valor.isNotBlank() && termo !in cabecalhoCore }
+            val dinamicos = parseFlatJsonMap(occurrence.dynamicFieldsJson)
+            val atributos = dinamicos
+                .filter { (termo, valor) ->
+                    valor.isNotBlank() && termo !in cabecalhoCore && termo !in DarwinCoreCatalog.measurementTerms
+                }
                 .map { (termo, valor) ->
                     mapOf(
                         "occurrenceID" to occurrence.occurrenceId,
@@ -289,16 +306,38 @@ private class ExportPackage(
                         "measurementRemarks" to "Oikos FieldBook: $termo"
                     )
                 }
+            val medidaDeclarada = dinamicos["measurementType"].orEmpty()
+            val valorDeclarado = dinamicos["measurementValue"].orEmpty()
+            val declarada = if (medidaDeclarada.isNotBlank() && valorDeclarado.isNotBlank()) {
+                listOf(
+                    mapOf(
+                        "occurrenceID" to occurrence.occurrenceId,
+                        "measurementType" to medidaDeclarada,
+                        "measurementValue" to valorDeclarado,
+                        "measurementUnit" to dinamicos["measurementUnit"].orEmpty(),
+                        "measurementMethod" to dinamicos["measurementMethod"].orEmpty(),
+                        "measurementDeterminedBy" to dinamicos["measurementDeterminedBy"].orEmpty(),
+                        "measurementDeterminedDate" to dinamicos["measurementDeterminedDate"].orEmpty(),
+                        "measurementAccuracy" to dinamicos["measurementAccuracy"].orEmpty(),
+                        "measurementRemarks" to ""
+                    )
+                )
+            } else emptyList()
+            atributos + declarada
         }
 
-        val linhasMidia = mediaLinks
+        // A extensao de multimidia exige URL publica (dc:identifier); caminho
+        // dentro do ZIP nao resolve em lugar nenhum. Sem URL base no projeto,
+        // a extensao fica de fora e a exportacao avisa.
+        val baseUrl = project.mediaBaseUrl.trim().trimEnd('/')
+        val linhasMidia = if (baseUrl.isBlank()) emptyList() else mediaLinks
             .filter { it.occurrenceID.isNotBlank() }
             .map { link ->
                 mapOf(
                     "occurrenceID" to link.occurrenceID,
                     "type" to if (link.type == "audio") "Sound" else "StillImage",
                     "format" to link.mimeType,
-                    "identifier" to link.relativePath,
+                    "identifier" to "$baseUrl/${java.net.URLEncoder.encode(link.fileName, "UTF-8").replace("+", "%20")}",
                     "title" to link.mediaSubject,
                     "description" to link.caption,
                     "created" to link.capturedAt
@@ -310,13 +349,12 @@ private class ExportPackage(
 
         val metadata = ArchiveMetadata(
             datasetTitle = project.name,
-            creatorName = project.principalInvestigator.ifBlank { project.name },
-            organization = project.institution,
+            creatorName = project.principalInvestigator.trim(),
+            organization = project.institution.trim(),
             abstractText = project.description.ifBlank {
                 "Conjunto de dados de ocorrencia coletado com o Oikos FieldBook."
             },
-            license = "Direitos reservados ao detentor do conjunto de dados. " +
-                "Defina uma licenca antes de publicar (recomendado: CC BY 4.0).",
+            licenseCode = project.license,
             methods = sessions.mapNotNull { it.samplingProtocol.ifBlank { null } }
                 .distinct()
                 .joinToString("; ")
@@ -348,8 +386,16 @@ private class ExportPackage(
         )
     }
 
-    fun validationWarnings(): String {
+    fun validationWarnings(format: ExportFormat? = null): String {
         val warnings = mutableListOf<String>()
+        if (format == ExportFormat.DwcArchive || format == ExportFormat.Zip) {
+            if (project.license.isBlank()) {
+                warnings += "Licença do conjunto não definida: o GBIF exige CC0, CC BY ou CC BY-NC (defina em Editar projeto)."
+            }
+            if (project.mediaBaseUrl.isBlank() && mediaLinks.any { it.occurrenceID.isNotBlank() }) {
+                warnings += "Mídias fora do Darwin Core Archive: o padrão exige URL pública. Informe a URL das mídias em Editar projeto."
+            }
+        }
         if (occurrences.isEmpty()) warnings += "Nenhuma ocorrência encontrada para exportar."
         val withoutId = occurrences.count { it.occurrenceId.isBlank() }
         if (withoutId > 0) warnings += "$withoutId ocorrência(s) sem occurrenceID."
@@ -382,10 +428,11 @@ private class ExportPackage(
                 "03_sig_qgis/ocorrencias_e_trilhas.geojson",
                 "02_tabelas_de_apoio/expedicoes.csv",
                 "02_tabelas_de_apoio/trilha_gps_pontos.csv",
-                "02_tabelas_de_apoio/measurement_or_fact.csv"
+                "02_tabelas_de_apoio/measurement_or_fact.csv",
+                "04_darwin_core_archive/dwca.zip"
             )
         }
-        files += mediaLinks.map { it.relativePath }
+        files += mediaLinks.filter { File(it.sourcePath).exists() }.map { it.relativePath }
         return JSONObject()
             .put("projectID", "PROJ-${project.id.toString().padStart(3, '0')}")
             .put("projectName", project.name)
@@ -403,7 +450,7 @@ private class ExportPackage(
             .put("files", JSONArray(files))
             .put("mediaLinks", JSONArray(mediaLinks.map { JSONObject(it.manifestMap()) }))
             .put("gpsTracks", JSONArray(tracks.map { JSONObject(trackMap(it)) }))
-            .put("warnings", JSONArray(validationWarnings().lines().filter { it.isNotBlank() }))
+            .put("warnings", JSONArray(validationWarnings(ExportFormat.Zip).lines().filter { it.isNotBlank() }))
             .toString(2)
     }
 
@@ -421,8 +468,9 @@ private class ExportPackage(
         - 01_planilha_principal/: arquivos principais para análise. O CSV Darwin Core é a tabela principal de ocorrências; o XLSX reúne projeto, expedições, ocorrências, mídias, trilhas e campos usados em abas.
         - 02_tabelas_de_apoio/: tabelas auxiliares, como expedições, mídias, pontos da trilha GPS e MeasurementOrFact.
         - 03_sig_qgis/: GeoJSON para abrir no QGIS, com ocorrências como Point e trilhas como LineString.
-        - 04_midias/fotos/: fotografias exportadas com nomes rastreáveis.
-        - 04_midias/audios/: áudios exportados com nomes rastreáveis.
+        - 04_darwin_core_archive/dwca.zip: pacote Darwin Core Archive (meta.xml, eml.xml, occurrence.txt e extensões) para IPT, GBIF e SiBBr.
+        - 05_midias/fotos/: fotografias exportadas com nomes rastreáveis.
+        - 05_midias/audios/: áudios exportados com nomes rastreáveis.
         - manifest.json: resumo da exportação e relação completa entre mídias e registros.
 
         Cada foto ou áudio está ligado a um registro por occurrenceID, ou a uma expedição por eventID.
@@ -437,7 +485,11 @@ private class ExportPackage(
 
     private fun occurrenceHeaders(): List<String> {
         val configured = fields.filter { it.enabled }.map { it.dwcTerm }
-        val utmHeaders = if (project.coordinateFormat == "UTM") utmExportHeaders else emptyList()
+        val utmHeaders = when (project.coordinateFormat) {
+            "UTM" -> utmExportHeaders
+            "DMS", "DMM" -> verbatimExportHeaders
+            else -> emptyList()
+        }
         return (DarwinCoreCatalog.coreOccurrenceTerms + configured + utmHeaders + "associatedMedia").distinct()
     }
 
@@ -463,7 +515,7 @@ private class ExportPackage(
             "identifiedBy" to occurrence.identifiedBy,
             "dateIdentified" to occurrence.dateIdentified,
             "eventDate" to dynamic["eventDate"].orEmpty().ifBlank { session?.eventDate.orEmpty() },
-            "eventTime" to dynamic["eventTime"].orEmpty().ifBlank { session?.startTime.orEmpty() },
+            "eventTime" to dynamic["eventTime"].orEmpty().ifBlank { session?.let { timeRange(it) }.orEmpty() },
             "samplingProtocol" to session?.samplingProtocol.orEmpty(),
             "samplingEffort" to session?.samplingEffort.orEmpty(),
             "habitat" to session?.habitat.orEmpty(),
@@ -480,7 +532,7 @@ private class ExportPackage(
             "fieldNotes" to occurrence.fieldNotes,
             "associatedMedia" to associatedMedia(links)
         )
-        if (project.coordinateFormat == "UTM") base.withUtm(latitude, longitude, datum)
+        base.withVerbatim(latitude, longitude, datum)
         dynamic.forEach { (key, value) -> base[key] = value }
         fields.filter { it.enabled && !base.containsKey(it.dwcTerm) }.forEach { base[it.dwcTerm] = "" }
         return base
@@ -491,7 +543,7 @@ private class ExportPackage(
             "projectID" to "PROJ-${project.id.toString().padStart(3, '0')}",
             "eventID" to session.eventId,
             "eventDate" to session.eventDate,
-            "eventTime" to session.startTime,
+            "eventTime" to timeRange(session),
             "locality" to session.locality,
             "habitat" to session.habitat,
             "parentEventID" to session.parentEventId,
@@ -506,7 +558,7 @@ private class ExportPackage(
             "coordinateUncertaintyInMeters" to decimal(session.coordinateUncertaintyInMeters),
             "geodeticDatum" to session.geodeticDatum,
             "eventRemarks" to session.notes
-        ).withUtm(session.latitude, session.longitude, session.geodeticDatum)
+        ).withVerbatim(session.latitude, session.longitude, session.geodeticDatum)
 
     private fun projectMap(): Map<String, String> = mapOf(
         "projectID" to "PROJ-${project.id.toString().padStart(3, '0')}",
@@ -558,11 +610,25 @@ private class ExportPackage(
                 "timestamp" to millis(point.timestamp),
                 "speed" to decimal(point.speed),
                 "geodeticDatum" to track.geodeticDatum
-            ).withUtm(point.latitude, point.longitude, track.geodeticDatum)
+            ).withVerbatim(point.latitude, point.longitude, track.geodeticDatum)
         }
     }
 
-    private fun MutableMap<String, String>.withUtm(latitude: Double?, longitude: Double?, datum: String): MutableMap<String, String> {
+    /**
+     * Coordenada no formato escolhido pelo projeto, em dwc:verbatimCoordinates.
+     * O valor oficial continua em graus decimais (decimalLatitude/Longitude);
+     * UTM, GMS e GMD sao a forma "como lida", que e o que o padrao preve.
+     * Ate a v0.2.0 so UTM era exportado; GMS/GMD podiam ser escolhidos e nao
+     * apareciam em lugar nenhum.
+     */
+    private fun MutableMap<String, String>.withVerbatim(latitude: Double?, longitude: Double?, datum: String): MutableMap<String, String> {
+        if (project.coordinateFormat == "DMS" || project.coordinateFormat == "DMM") {
+            val verbatim = CoordinateUtils.verbatim(latitude, longitude, project.coordinateFormat)
+            this["verbatimCoordinates"] = verbatim?.first.orEmpty()
+            this["verbatimCoordinateSystem"] = verbatim?.second.orEmpty()
+            this["verbatimSRS"] = if (verbatim != null) datum else ""
+            return this
+        }
         if (project.coordinateFormat != "UTM") return this
         val utm = CoordinateUtils.toUtm(latitude, longitude)
         this["verbatimCoordinateSystem"] = "UTM"
@@ -576,13 +642,21 @@ private class ExportPackage(
             return this
         }
         val hemisphere = if (utm.hemisphere == UtmHemisphere.South) "S" else "N"
-        this["verbatimCoordinates"] = "${utm.zone}${hemisphere} ${decimal(utm.easting)} ${decimal(utm.northing)}"
+        // Decimetro: o metro com 8 casas sugeria uma precisao de micrometro.
+        val easting = String.format(Locale.US, "%.1f", utm.easting)
+        val northing = String.format(Locale.US, "%.1f", utm.northing)
+        this["verbatimCoordinates"] = "${utm.zone}${hemisphere} $easting $northing"
         this["utmZone"] = utm.zone.toString()
         this["utmHemisphere"] = hemisphere
-        this["utmEasting"] = decimal(utm.easting)
-        this["utmNorthing"] = decimal(utm.northing)
+        this["utmEasting"] = easting
+        this["utmNorthing"] = northing
         return this
     }
+
+    /** Hora da expedicao como intervalo ISO 8601 ("08:00/10:30") quando ha termino. */
+    private fun timeRange(session: SessionEntity): String =
+        if (session.endTime.isNotBlank() && session.startTime.isNotBlank()) "${session.startTime}/${session.endTime}"
+        else session.startTime
 
     private fun measurementRows(): List<Map<String, String>> {
         val directTerms = occurrenceHeaders().toSet()
@@ -627,7 +701,7 @@ private class ExportPackage(
             val extension = extensionFor(item)
             val folder = if (item.mediaType == "audio") "audios" else "fotos"
             val fileName = uniqueMediaFileName(item, occurrence, session, extension, counters)
-            val relativePath = "04_midias/$folder/$fileName"
+            val relativePath = "05_midias/$folder/$fileName"
             MediaLink(
                 mediaID = "MED-${item.id.toString().padStart(6, '0')}",
                 projectID = "PROJ-${item.projectId.toString().padStart(3, '0')}",
@@ -702,17 +776,28 @@ private class ExportPackage(
     private fun associatedMedia(links: List<MediaLink>): String = links.joinToString("; ") { it.relativePath }
 
     /**
-     * CSV para planilha. Leva BOM de UTF-8 e separador ponto-e-virgula porque o
-     * Excel em portugues do Brasil, ao abrir por duplo clique, assume
-     * Windows-1252 e ponto-e-virgula: sem isso os acentos quebram e tudo cai em
-     * uma coluna so. R e Python leem normalmente com sep=";" e encoding UTF-8.
-     * Os arquivos do Darwin Core Archive nao passam por aqui: eles sao TSV sem
-     * BOM, como o meta.xml declara.
+     * CSV para planilha, em um de dois padroes coerentes, escolhido no projeto:
+     *
+     * - "br" (padrao): BOM de UTF-8, separador ";" e VIRGULA decimal. E o que o
+     *   Excel em portugues abre por duplo clique sem quebrar acento nem numero,
+     *   e o que o read.csv2() do R le direto.
+     * - "intl": sem BOM, separador "," e ponto decimal, para R/Python/QGIS.
+     *
+     * Ate a v0.2.0 o arquivo misturava ";" com ponto decimal: no Excel pt-BR,
+     * "12.345" virava 12345 (ponto lido como milhar). Os arquivos do Darwin Core
+     * Archive nao passam por aqui: sao TSV com ponto decimal, como o padrao exige.
      */
     private fun csv(headers: List<String>, rows: List<Map<String, String>>): String = buildString {
-        append(UTF8_BOM)
-        appendLine(headers.joinToString(CSV_SEPARATOR))
-        rows.forEach { row -> appendLine(headers.joinToString(CSV_SEPARATOR) { csvCell(row[it].orEmpty()) }) }
+        val brazilian = project.csvStyle != "intl"
+        val separator = if (brazilian) ";" else ","
+        if (brazilian) append(UTF8_BOM)
+        appendLine(headers.joinToString(separator) { csvCell(it, separator) })
+        rows.forEach { row ->
+            appendLine(headers.joinToString(separator) { header ->
+                val value = row[header].orEmpty()
+                csvCell(if (brazilian) brazilianDecimal(value) else value, separator)
+            })
+        }
     }
 
     private fun table(rows: List<Map<String, String>>): List<List<String>> {
@@ -724,9 +809,10 @@ private class ExportPackage(
     private fun exportedAt(): String = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
     private fun millis(value: Long): String = java.time.Instant.ofEpochMilli(value).toString()
     private fun decimal(value: Double?): String = value?.let { String.format(Locale.US, "%.8f", it).trimEnd('0').trimEnd('.') }.orEmpty()
-    private fun csvCell(value: String): String {
+    private fun csvCell(value: String, separator: String): String {
         val escaped = value.replace("\"", "\"\"")
-        return if (escaped.any { it == ';' || it == ',' || it == '"' || it == '\n' || it == '\r' }) "\"$escaped\"" else escaped
+        val needsQuotes = escaped.contains(separator) || escaped.any { it == '"' || it == '\n' || it == '\r' }
+        return if (needsQuotes) "\"$escaped\"" else escaped
     }
 
     private fun safeToken(value: String): String = value.uppercase(Locale.ROOT)
@@ -753,7 +839,8 @@ private class ExportPackage(
             .filter { it.isNotBlank() && it !in setOf("DE", "DA", "DO", "DAS", "DOS", "E", "A", "O") }
 
     companion object {
-        private val utmExportHeaders = listOf("verbatimCoordinates", "verbatimCoordinateSystem", "verbatimSRS", "utmZone", "utmHemisphere", "utmEasting", "utmNorthing")
+        private val verbatimExportHeaders = listOf("verbatimCoordinates", "verbatimCoordinateSystem", "verbatimSRS")
+        private val utmExportHeaders = verbatimExportHeaders + listOf("utmZone", "utmHemisphere", "utmEasting", "utmNorthing")
         private val sessionHeaders = listOf("projectID", "eventID", "parentEventID", "eventDate", "verbatimEventDate", "eventTime", "locality", "habitat", "samplingProtocol", "samplingEffort", "sampleSizeValue", "sampleSizeUnit", "recordedBy", "decimalLatitude", "decimalLongitude", "coordinateUncertaintyInMeters", "geodeticDatum") + utmExportHeaders + "eventRemarks"
         // bodyPartOrPlantPart, behaviorContext e notes saiam repetindo
         // literalmente mediaSubject e caption; a repeticao afirmava sobre o dado
@@ -765,13 +852,18 @@ private class ExportPackage(
         /** BOM de UTF-8: faz o Excel pt-BR reconhecer a codificacao. */
         private const val UTF8_BOM = "\uFEFF"
 
-        /** Separador do CSV de planilha (nao vale para o TSV do DwC-A). */
-        private const val CSV_SEPARATOR = ";"
+        /** Numero com ponto decimal, como o app grava internamente. */
+        private val DECIMAL_NUMBER = Regex("^-?\\d+\\.\\d+$")
+
+        /** "12.5" vira "12,5" no CSV brasileiro; texto e inteiro ficam como estao. */
+        fun brazilianDecimal(value: String): String =
+            if (DECIMAL_NUMBER.matches(value)) value.replace('.', ',') else value
 
         /** MeasurementOrFact do archive: coreid na coluna 0. */
         private val archiveMeasurementHeaders = listOf(
             "occurrenceID", "measurementType", "measurementValue", "measurementUnit",
-            "measurementRemarks"
+            "measurementMethod", "measurementDeterminedBy", "measurementDeterminedDate",
+            "measurementAccuracy", "measurementRemarks"
         )
 
         /** Simple Multimedia do GBIF: coreid na coluna 0. */
@@ -842,7 +934,6 @@ private fun ZipOutputStream.put(name: String, content: ByteArray) {
     closeEntry()
 }
 
-private fun ZipOutputStream.putBytes(name: String, content: ByteArray) = put(name, content)
 
 private object XlsxWriter {
     fun write(sheets: List<Pair<String, List<List<String>>>>): ByteArray {

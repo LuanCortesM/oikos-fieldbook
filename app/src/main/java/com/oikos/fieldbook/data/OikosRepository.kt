@@ -46,8 +46,28 @@ class OikosRepository(private val db: OikosDatabase) {
         )
     }
 
+    /**
+     * Acrescenta ao projeto os termos novos do catalogo (desligados conforme o
+     * catalogo) e atualiza rotulo, tipo e grupo dos que ja existem, preservando
+     * o que o pesquisador escolheu: ligado e obrigatorio. Sem a atualizacao, um
+     * rotulo corrigido no catalogo (por exemplo "DAP (cm)") nunca chegava aos
+     * projetos ja criados.
+     */
     suspend fun ensureFieldCatalog(projectId: Long) {
-        val existingTerms = db.fieldConfigDao().getForProject(projectId).map { it.dwcTerm }.toSet()
+        val existing = db.fieldConfigDao().getForProject(projectId)
+        val refreshed = existing.mapNotNull { field ->
+            val definition = DarwinCoreCatalog.byTerm[field.dwcTerm] ?: return@mapNotNull null
+            val updated = field.copy(
+                labelPt = definition.labelPt,
+                labelEn = definition.labelEn,
+                fieldType = definition.type,
+                groupName = definition.group,
+                displayOrder = definition.order
+            )
+            updated.takeIf { it != field }
+        }
+        refreshed.forEach { db.fieldConfigDao().update(it) }
+        val existingTerms = existing.map { it.dwcTerm }.toSet()
         val missing = DarwinCoreCatalog.allFields.filterNot { it.term in existingTerms }
         if (missing.isNotEmpty()) {
             db.fieldConfigDao().insertAll(
@@ -96,6 +116,7 @@ class OikosRepository(private val db: OikosDatabase) {
     suspend fun getMediaForOccurrence(occurrenceId: Long): List<MediaEntity> = db.mediaDao().getForOccurrence(occurrenceId)
     suspend fun getTracks(projectId: Long): List<GpsTrackEntity> = db.gpsTrackDao().getForProject(projectId)
     suspend fun getTrack(trackId: Long): GpsTrackEntity? = db.gpsTrackDao().getTrack(trackId)
+    suspend fun getActiveTracks(): List<GpsTrackEntity> = db.gpsTrackDao().getActiveTracks()
     suspend fun getTrackPoints(trackId: Long): List<GpsTrackPointEntity> = db.gpsTrackDao().getPoints(trackId)
     suspend fun getLastTrackPoint(trackId: Long): GpsTrackPointEntity? = db.gpsTrackDao().getLastPoint(trackId)
     suspend fun countTrackPoints(trackId: Long): Int = db.gpsTrackDao().countPoints(trackId)

@@ -79,6 +79,32 @@ class DarwinCoreCatalogTest {
     }
 
     @Test
+    fun `nada fora do Darwin Core vai para o core do archive`() {
+        // substrate nao existe no Darwin Core; measurement* sao da classe
+        // MeasurementOrFact. Antes os dois iam para o core com URI dwc invalida.
+        assertTrue("substrate" in DarwinCoreCatalog.nonCoreTerms)
+        assertTrue("measurementType" in DarwinCoreCatalog.nonCoreTerms)
+        assertTrue(DarwinCoreCatalog.customTerms.all { it in DarwinCoreCatalog.nonCoreTerms })
+        assertFalse("scientificName" in DarwinCoreCatalog.nonCoreTerms)
+    }
+
+    @Test
+    fun `medidas numericas declaram unidade`() {
+        // DAP e CAP saiam no MeasurementOrFact sem unidade: 12.4 de que?
+        val semUnidade = DarwinCoreCatalog.advancedOccurrenceFields
+            .filter { it.type == "decimal" || it.type == "integer" }
+            .filter { it.unit.isBlank() }
+            .map { it.term }
+        assertTrue("medidas sem unidade: $semUnidade", semUnidade.isEmpty())
+    }
+
+    @Test
+    fun `nome cientifico nao passa por autocorrecao`() {
+        assertTrue("scientificName" in DarwinCoreCatalog.noAutocorrectTerms)
+        assertTrue(DarwinCoreCatalog.noAutocorrectTerms.all { it in DarwinCoreCatalog.byTerm })
+    }
+
+    @Test
     fun `campos de colecao necessarios para tombo existem`() {
         val termos = DarwinCoreCatalog.allFields.map { it.term }.toSet()
         listOf(

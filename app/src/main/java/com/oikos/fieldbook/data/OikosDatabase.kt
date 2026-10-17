@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         GpsTrackEntity::class,
         GpsTrackPointEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = true
 )
 abstract class OikosDatabase : RoomDatabase() {
@@ -34,7 +34,11 @@ abstract class OikosDatabase : RoomDatabase() {
                 .addMigrations(MIGRATION_1_2)
                 .addMigrations(MIGRATION_2_3)
                 .addMigrations(MIGRATION_3_4)
+                .addMigrations(MIGRATION_4_5)
                 .build()
+
+        /** Visivel para o teste de migracao. */
+        val ALL_MIGRATIONS: Array<Migration> get() = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -126,6 +130,14 @@ abstract class OikosDatabase : RoomDatabase() {
                 addColumnIfMissing(db, "sessions", "sampleSizeValue", "REAL")
                 addColumnIfMissing(db, "sessions", "sampleSizeUnit", "TEXT NOT NULL DEFAULT ''")
                 addColumnIfMissing(db, "sessions", "verbatimEventDate", "TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                addColumnIfMissing(db, "projects", "license", "TEXT NOT NULL DEFAULT ''")
+                addColumnIfMissing(db, "projects", "mediaBaseUrl", "TEXT NOT NULL DEFAULT ''")
+                addColumnIfMissing(db, "projects", "csvStyle", "TEXT NOT NULL DEFAULT 'br'")
             }
         }
 

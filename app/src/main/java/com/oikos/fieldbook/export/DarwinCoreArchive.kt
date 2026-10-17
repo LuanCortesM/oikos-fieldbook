@@ -8,10 +8,12 @@ import java.util.zip.ZipOutputStream
 /** Metadados do conjunto de dados, usados para gerar o eml.xml. */
 data class ArchiveMetadata(
     val datasetTitle: String,
+    /** Pessoa responsavel; pode ficar vazio, e entao so a instituicao aparece. */
     val creatorName: String,
     val organization: String,
     val abstractText: String,
-    val license: String,
+    /** "CC0-1.0", "CC-BY-4.0", "CC-BY-NC-4.0" ou vazio (licenca ainda nao definida). */
+    val licenseCode: String,
     val methods: String,
     val language: String = "por",
     val packageId: String,
@@ -167,18 +169,15 @@ object DarwinCoreArchive {
         append("  <dataset>\n")
         append("    <title xml:lang=\"").append(m.language).append("\">")
         append(xml(m.datasetTitle)).append("</title>\n")
-        append("    <creator>\n")
-        append("      <individualName><surName>").append(xml(m.creatorName))
-        append("</surName></individualName>\n")
-        if (m.organization.isNotBlank()) {
-            append("      <organizationName>").append(xml(m.organization))
-            append("</organizationName>\n")
-        }
-        append("    </creator>\n")
+        // A ordem dos elementos segue a sequencia do esquema EML 2.1.1:
+        // title, creator, metadataProvider, pubDate, language, abstract,
+        // intellectualRights, coverage, contact, methods. contact e obrigatorio.
+        append(party("creator", m))
+        append(party("metadataProvider", m))
         append("    <pubDate>").append(xml(m.pubDate)).append("</pubDate>\n")
         append("    <language>").append(m.language).append("</language>\n")
         append("    <abstract><para>").append(xml(m.abstractText)).append("</para></abstract>\n")
-        append("    <intellectualRights><para>").append(xml(m.license)).append("</para></intellectualRights>\n")
+        append("    <intellectualRights>").append(licenseParagraph(m.licenseCode)).append("</intellectualRights>\n")
 
         val temGeo = m.westBound != null && m.eastBound != null &&
             m.southBound != null && m.northBound != null
@@ -216,6 +215,7 @@ object DarwinCoreArchive {
             }
             append("    </coverage>\n")
         }
+        append(party("contact", m))
         if (m.methods.isNotBlank()) {
             append("    <methods><methodStep><description><para>")
             append(xml(m.methods))
@@ -223,6 +223,31 @@ object DarwinCoreArchive {
         }
         append("  </dataset>\n")
         append("</eml:eml>\n")
+    }
+
+    /**
+     * Parte responsavel (creator, metadataProvider, contact). O EML exige ao
+     * menos pessoa ou organizacao; se o projeto nao informar nenhuma das duas,
+     * o titulo do conjunto entra como organizacao para o arquivo continuar valido.
+     */
+    private fun party(tag: String, m: ArchiveMetadata): String = buildString {
+        append("    <").append(tag).append(">\n")
+        if (m.creatorName.isNotBlank()) {
+            append("      <individualName><surName>").append(xml(m.creatorName)).append("</surName></individualName>\n")
+        }
+        val organization = m.organization.ifBlank { if (m.creatorName.isBlank()) m.datasetTitle else "" }
+        if (organization.isNotBlank()) {
+            append("      <organizationName>").append(xml(organization)).append("</organizationName>\n")
+        }
+        append("    </").append(tag).append(">\n")
+    }
+
+    /** Texto da licenca no mesmo formato que o IPT do GBIF gera e reconhece. */
+    fun licenseParagraph(code: String): String = when (code) {
+        "CC0-1.0" -> "<para>To the extent possible under law, the publisher has waived all rights to these data and has dedicated them to the <ulink url=\"http://creativecommons.org/publicdomain/zero/1.0/legalcode\"><citetitle>Public Domain (CC0 1.0)</citetitle></ulink>. Users may copy, modify, distribute and use the work, including for commercial purposes, without restriction.</para>"
+        "CC-BY-4.0" -> "<para>This work is licensed under a <ulink url=\"http://creativecommons.org/licenses/by/4.0/legalcode\"><citetitle>Creative Commons Attribution (CC-BY) 4.0 License</citetitle></ulink>.</para>"
+        "CC-BY-NC-4.0" -> "<para>This work is licensed under a <ulink url=\"http://creativecommons.org/licenses/by-nc/4.0/legalcode\"><citetitle>Creative Commons Attribution Non Commercial (CC-BY-NC) 4.0 License</citetitle></ulink>.</para>"
+        else -> "<para>Licença ainda não definida pelo detentor dos dados. Defina CC0, CC BY 4.0 ou CC BY-NC 4.0 no projeto antes de publicar.</para>"
     }
 
     private fun xml(value: String): String = value
