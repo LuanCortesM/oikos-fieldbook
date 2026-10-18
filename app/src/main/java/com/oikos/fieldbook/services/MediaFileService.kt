@@ -18,7 +18,9 @@ import java.util.Locale
 data class PhotoMetadata(
     val capturedAt: Long? = null,
     val latitude: Double? = null,
-    val longitude: Double? = null
+    val longitude: Double? = null,
+    /** Fabricante e modelo da camera, do EXIF. */
+    val captureDevice: String = ""
 )
 
 class MediaFileService(private val context: Context) {
@@ -48,33 +50,79 @@ class MediaFileService(private val context: Context) {
     fun createImageFile(projectId: Long, sessionId: Long, baseName: String? = null): File =
         uniqueFile(mediaDir(projectId, sessionId, "photo"), safeFileBase(baseName ?: "FOTO_${System.currentTimeMillis()}"), "jpg")
 
-    fun createAudioFile(projectId: Long, sessionId: Long, audioFormat: String = "wav", baseName: String? = null): File {
-        val extension = if (audioFormat == "mp3") "mp3" else "wav"
-        return uniqueFile(mediaDir(projectId, sessionId, "audio"), safeFileBase(baseName ?: "AUDIO_${System.currentTimeMillis()}"), extension)
+    /** Gravacao do app: sempre WAV PCM, sem compressao (o que a bioacustica usa). */
+    fun createAudioFile(projectId: Long, sessionId: Long, baseName: String? = null): File {
+        return uniqueFile(mediaDir(projectId, sessionId, "audio"), safeFileBase(baseName ?: "AUDIO_${System.currentTimeMillis()}"), "wav")
     }
 
     fun uriFor(file: File): Uri =
         FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
 
-    /** Copia um arquivo escolhido pelo usuario. Chamar fora da main thread. */
-    fun importUri(uri: Uri, projectId: Long, sessionId: Long, type: String, mimeType: String?, baseName: String? = null): File {
-        val extension = when {
-            mimeType == "audio/mpeg" -> "mp3"
-            mimeType == "audio/wav" || mimeType == "audio/x-wav" -> "wav"
-            mimeType?.contains("audio") == true -> "wav"
-            mimeType?.contains("png") == true -> "png"
-            else -> "jpg"
-        }
+    /**
+     * Copia um arquivo escolhido pelo usuario. Chamar fora da main thread.
+     *
+     * A extensao vem do conteudo do arquivo, nao do tipo informado pelo outro
+     * app: antes todo audio que nao fosse MP3 virava ".wav" (um M4A ou OGG com
+     * extensao errada nao abre em programas de analise).
+     */
+    fun importUri(uri: Uri, projectId: Long, sessionId: Long, type: String, mimeType: String?, baseName: String? = null): ImportedFile {
         val fallback = if (type == "audio") "AUDIO_${System.currentTimeMillis()}" else "FOTO_${System.currentTimeMillis()}"
-        val file = uniqueFile(mediaDir(projectId, sessionId, type), safeFileBase(baseName ?: fallback), extension)
-        context.contentResolver.openInputStream(uri).use { input ->
-            FileOutputStream(file).use { output -> input?.copyTo(output) }
+        val base = safeFileBase(baseName ?: fallback)
+        val dir = mediaDir(projectId, sessionId, type)
+        val staging = uniqueFile(dir, base, "importando")
+        try {
+            val input = context.contentResolver.openInputStream(uri) ?: throw java.io.IOException("o outro app não entregou o arquivo")
+            input.use { source -> FileOutputStream(staging).use { output -> source.copyTo(output) } }
+            if (staging.length() == 0L) throw java.io.IOException("o arquivo escolhido está vazio")
+            val detected = MediaKind.detect(staging)
+            val mime = detected?.mime ?: mimeType?.takeIf { it.isNotBlank() && it != "application/octet-stream" }
+                ?: if (type == "audio") "audio/*" else "image/*"
+            val extension = detected?.extension
+                ?: mimeType?.let { android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(it) }
+                ?: if (type == "audio") "audio" else "img"
+            val file = uniqueFile(dir, base, extension)
+            if (!staging.renameTo(file)) {
+                staging.copyTo(file, overwrite = true)
+                staging.delete()
+            }
+            return ImportedFile(file, mime)
+        } catch (error: Throwable) {
+            // Copia pela metade (disco cheio, arquivo na nuvem sem sinal) nao fica para tras.
+            staging.delete()
+            throw error
         }
-        return file
+    }
+
+    /**
+     * Ajusta a extensao ao conteudo: foto HEIC ou WebP sai da reducao como
+     * JPEG, e o nome precisa acompanhar.
+     */
+    fun matchExtensionToContent(file: File, fallbackMime: String): ImportedFile {
+        val kind = MediaKind.detect(file) ?: return ImportedFile(file, fallbackMime)
+        if (file.extension.equals(kind.extension, ignoreCase = true)) return ImportedFile(file, kind.mime)
+        val target = uniqueFile(file.parentFile ?: return ImportedFile(file, kind.mime), file.nameWithoutExtension, kind.extension)
+        if (!file.renameTo(target)) {
+            file.copyTo(target, overwrite = true)
+            file.delete()
+        }
+        return ImportedFile(target, kind.mime)
+    }
+
+    /** Apaga copias de importacao interrompidas (app fechado no meio). */
+    fun cleanupInterruptedImports(olderThanMillis: Long = 24 * 60 * 60 * 1000L) {
+        val limit = System.currentTimeMillis() - olderThanMillis
+        projectsRoot().takeIf { it.isDirectory }?.walkTopDown()
+            ?.filter { it.isFile && it.extension == "importando" && it.lastModified() < limit }
+            ?.forEach { it.delete() }
     }
 
     /** Le data/hora e GPS do EXIF. Deve ser chamada ANTES de [compressImage]. */
-    fun readPhotoMetadata(file: File): PhotoMetadata {
+    /**
+     * [fileTimeFallback]: sem data no EXIF, usar a hora do arquivo. Vale para a
+     * foto que a camera acabou de gravar; numa copia importada, a hora do
+     * arquivo e a da importacao, e a data fica desconhecida.
+     */
+    fun readPhotoMetadata(file: File, fileTimeFallback: Boolean = true): PhotoMetadata {
         if (!file.exists()) return PhotoMetadata()
         return runCatching {
             val exif = ExifInterface(file.absolutePath)
@@ -88,12 +136,15 @@ class MediaFileService(private val context: Context) {
                     runCatching { SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).parse(value)?.time }.getOrNull()
                 }
             }
+            val device = listOfNotNull(exif.getAttribute(ExifInterface.TAG_MAKE), exif.getAttribute(ExifInterface.TAG_MODEL))
+                .map { it.trim() }.filter { it.isNotEmpty() }.distinct().joinToString(" ")
             PhotoMetadata(
-                capturedAt = capturedAt ?: file.lastModified().takeIf { it > 0L },
+                capturedAt = capturedAt ?: file.lastModified().takeIf { it > 0L && fileTimeFallback },
                 latitude = latLong?.getOrNull(0),
-                longitude = latLong?.getOrNull(1)
+                longitude = latLong?.getOrNull(1),
+                captureDevice = device
             )
-        }.getOrDefault(PhotoMetadata(capturedAt = file.lastModified().takeIf { it > 0L }))
+        }.getOrDefault(PhotoMetadata(capturedAt = file.lastModified().takeIf { it > 0L && fileTimeFallback }))
     }
 
     /**
@@ -132,13 +183,18 @@ class MediaFileService(private val context: Context) {
         val isPng = file.extension.equals("png", ignoreCase = true)
         val format = if (isPng) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
         val temp = File(file.parentFile, "${file.name}.tmp")
-        val compressed = FileOutputStream(temp).use { output -> scaled.compress(format, targetQuality, output) }
-        scaled.recycle()
-        if (compressed && temp.length() > 0L) {
-            if (!isPng && originalExif != null) copyExif(originalExif, temp)
-            temp.copyTo(file, overwrite = true)
+        try {
+            val compressed = FileOutputStream(temp).use { output -> scaled.compress(format, targetQuality, output) }
+            if (compressed && temp.length() > 0L) {
+                if (!isPng && originalExif != null) copyExif(originalExif, temp)
+                // rename troca o arquivo de uma vez. copyTo(overwrite) apagava o
+                // original antes de copiar: uma falha no meio deixava a foto cortada.
+                if (!temp.renameTo(file)) temp.copyTo(file, overwrite = true)
+            }
+        } finally {
+            scaled.recycle()
+            temp.delete()
         }
-        temp.delete()
     }
 
     private fun copyExif(source: ExifInterface, target: File) {
@@ -204,11 +260,26 @@ class MediaFileService(private val context: Context) {
      * Arquivo de destino de uma exportacao. As exportacoes anteriores sao
      * apagadas: ja foram entregues ao app escolhido e so ocupariam espaco.
      */
+    /**
+     * Arquivo novo de exportacao. Antes cada exportacao apagava as anteriores:
+     * um CSV anexado a um e-mail ainda nao enviado sumia quando o XLSX era
+     * gerado em seguida. Agora so saem as com mais de um dia, e o mesmo nome
+     * no mesmo dia ganha numero.
+     */
     fun newExportFile(fileName: String): File {
         val dir = File(context.cacheDir, "exports")
         dir.mkdirs()
-        dir.listFiles()?.forEach { it.delete() }
-        return File(dir, fileName)
+        val limit = System.currentTimeMillis() - 24 * 60 * 60 * 1000L
+        dir.listFiles()?.filter { it.lastModified() < limit }?.forEach { it.deleteRecursively() }
+        val stem = fileName.substringBeforeLast('.')
+        val extension = fileName.substringAfterLast('.', "").let { if (it.isEmpty()) "" else ".$it" }
+        var candidate = File(dir, fileName)
+        var index = 2
+        while (!candidate.createNewFile()) {
+            candidate = File(dir, "$stem-$index$extension")
+            index++
+        }
+        return candidate
     }
 
     fun cacheSizeBytes(): Long = context.cacheDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
@@ -284,6 +355,11 @@ class MediaFileService(private val context: Context) {
 
     fun databaseSizeBytes(): Long = context.getDatabasePath("oikos_fieldbook.db").length()
 
+    /** Listas de especies (banco proprio) e mapas offline: grandes, mas baixaveis de novo. */
+    fun checklistsSizeBytes(): Long = listOf("", "-wal").sumOf { context.getDatabasePath("oikos_checklists.db$it").length() }
+
+    fun offlineMapsSizeBytes(): Long = File(context.filesDir, "mapas").walkTopDown().filter { it.isFile }.sumOf { it.length() }
+
     private fun ensureMapCacheConfigured() {
         val root = mapCacheRoot()
         root.mkdirs()
@@ -301,11 +377,17 @@ class MediaFileService(private val context: Context) {
             .trim('_')
             .ifBlank { "OIKOS_MEDIA" }
 
+    /**
+     * Nome livre, ja reservado no disco (arquivo vazio criado de forma
+     * atomica). Antes o nome era so conferido: uma foto importada e outra
+     * tirada ao mesmo tempo, com o mesmo nome base, recebiam o mesmo caminho
+     * e uma sobrescrevia a outra.
+     */
     private fun uniqueFile(dir: File, baseName: String, extension: String): File {
         dir.mkdirs()
         var candidate = File(dir, "$baseName.$extension")
         var suffix = 2
-        while (candidate.exists()) {
+        while (!candidate.createNewFile()) {
             candidate = File(dir, "${baseName}_${suffix.toString().padStart(2, '0')}.$extension")
             suffix += 1
         }

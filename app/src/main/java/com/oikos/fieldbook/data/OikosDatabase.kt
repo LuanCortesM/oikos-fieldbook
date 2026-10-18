@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         GpsTrackEntity::class,
         GpsTrackPointEntity::class
     ],
-    version = 5,
+    version = OikosDatabase.VERSION,
     exportSchema = true
 )
 abstract class OikosDatabase : RoomDatabase() {
@@ -29,16 +29,21 @@ abstract class OikosDatabase : RoomDatabase() {
     abstract fun gpsTrackDao(): GpsTrackDao
 
     companion object {
+        /** Versao atual do esquema; o backup recusa arquivos de versao maior. */
+        const val VERSION = 7
+
         fun create(context: Context): OikosDatabase =
             Room.databaseBuilder(context, OikosDatabase::class.java, "oikos_fieldbook.db")
                 .addMigrations(MIGRATION_1_2)
                 .addMigrations(MIGRATION_2_3)
                 .addMigrations(MIGRATION_3_4)
                 .addMigrations(MIGRATION_4_5)
+                .addMigrations(MIGRATION_5_6)
+                .addMigrations(MIGRATION_6_7)
                 .build()
 
         /** Visivel para o teste de migracao. */
-        val ALL_MIGRATIONS: Array<Migration> get() = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+        val ALL_MIGRATIONS: Array<Migration> get() = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -138,6 +143,33 @@ abstract class OikosDatabase : RoomDatabase() {
                 addColumnIfMissing(db, "projects", "license", "TEXT NOT NULL DEFAULT ''")
                 addColumnIfMissing(db, "projects", "mediaBaseUrl", "TEXT NOT NULL DEFAULT ''")
                 addColumnIfMissing(db, "projects", "csvStyle", "TEXT NOT NULL DEFAULT 'br'")
+            }
+        }
+
+
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                addColumnIfMissing(db, "media", "durationMillis", "INTEGER")
+                addColumnIfMissing(db, "media", "sampleRateHz", "INTEGER")
+                addColumnIfMissing(db, "media", "bitsPerSample", "INTEGER")
+                addColumnIfMissing(db, "media", "channels", "INTEGER")
+                addColumnIfMissing(db, "media", "audioSource", "TEXT NOT NULL DEFAULT ''")
+                addColumnIfMissing(db, "media", "captureDevice", "TEXT NOT NULL DEFAULT ''")
+                addColumnIfMissing(db, "media", "microphone", "TEXT NOT NULL DEFAULT ''")
+                addColumnIfMissing(db, "media", "airTemperature", "REAL")
+                addColumnIfMissing(db, "media", "relativeHumidity", "REAL")
+                addColumnIfMissing(db, "media", "distanceToSourceMeters", "REAL")
+                // Ate a v0.2.0, apagar uma ocorrencia apagava os arquivos das midias
+                // mas deixava as linhas no banco: midias fantasmas na lista e na
+                // exportacao. Os arquivos ja nao existem; so as linhas saem.
+                db.execSQL("DELETE FROM media WHERE occurrenceId IS NOT NULL AND occurrenceId NOT IN (SELECT id FROM occurrences)")
+            }
+        }
+
+        /** Data de captura desconhecida (midia importada sem data no arquivo). */
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                addColumnIfMissing(db, "media", "captureTimeKnown", "INTEGER NOT NULL DEFAULT 1")
             }
         }
 

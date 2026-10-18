@@ -141,7 +141,7 @@ interface GpsTrackDao {
     @Query("SELECT * FROM gps_tracks WHERE sessionId = :sessionId ORDER BY startTime DESC")
     fun observeForSession(sessionId: Long): Flow<List<GpsTrackEntity>>
 
-    @Query("SELECT * FROM gps_track_points WHERE trackId = :trackId ORDER BY timestamp")
+    @Query("SELECT * FROM gps_track_points WHERE trackId = :trackId ORDER BY timestamp, id")
     fun observePoints(trackId: Long): Flow<List<GpsTrackPointEntity>>
 
     @Query("SELECT * FROM gps_tracks WHERE projectId = :projectId ORDER BY startTime DESC")
@@ -153,10 +153,10 @@ interface GpsTrackDao {
     @Query("SELECT * FROM gps_tracks WHERE active = 1 ORDER BY startTime DESC")
     suspend fun getActiveTracks(): List<GpsTrackEntity>
 
-    @Query("SELECT * FROM gps_track_points WHERE trackId = :trackId ORDER BY timestamp")
+    @Query("SELECT * FROM gps_track_points WHERE trackId = :trackId ORDER BY timestamp, id")
     suspend fun getPoints(trackId: Long): List<GpsTrackPointEntity>
 
-    @Query("SELECT * FROM gps_track_points WHERE trackId = :trackId ORDER BY timestamp DESC LIMIT 1")
+    @Query("SELECT * FROM gps_track_points WHERE trackId = :trackId ORDER BY timestamp DESC, id DESC LIMIT 1")
     suspend fun getLastPoint(trackId: Long): GpsTrackPointEntity?
 
     @Query("SELECT COUNT(*) FROM gps_track_points WHERE trackId = :trackId")
@@ -170,4 +170,18 @@ interface GpsTrackDao {
 
     @Insert
     suspend fun insertPoint(point: GpsTrackPointEntity): Long
+
+    /**
+     * Soma o trecho e conta o ponto sem regravar a trilha inteira, e so se ela
+     * ainda estiver ativa. Antes a trilha lida antes de "Parar" era gravada de
+     * volta depois, e uma trilha encerrada voltava a ficar ativa.
+     */
+    @Query("UPDATE gps_tracks SET totalDistance = totalDistance + :distance, pointsCount = pointsCount + 1, duration = :now - startTime WHERE id = :trackId AND active = 1")
+    suspend fun addProgress(trackId: Long, distance: Double, now: Long): Int
+
+    @Query("UPDATE gps_tracks SET active = 0, endTime = :endTime, duration = MAX(0, :endTime - startTime) WHERE id = :trackId")
+    suspend fun close(trackId: Long, endTime: Long)
+
+    @Query("SELECT MAX(timestamp) FROM gps_track_points WHERE trackId = :trackId")
+    suspend fun lastPointTime(trackId: Long): Long?
 }

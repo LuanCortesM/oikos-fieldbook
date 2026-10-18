@@ -25,7 +25,9 @@ data class ArchiveMetadata(
     val northBound: Double?,
     val beginDate: String,
     val endDate: String,
-    val taxa: List<String>
+    val taxa: List<String>,
+    /** Software usado na coleta, com a citacao; vira um passo de metodo no EML. */
+    val softwareCitation: String = ""
 )
 
 /**
@@ -106,7 +108,7 @@ object DarwinCoreArchive {
         }
     }
 
-    fun clean(value: String): String = value
+    fun clean(value: String): String = xmlSafe(value)
         .replace(SEP, " ")
         .replace("\r\n", " ")
         .replace("\n", " ")
@@ -189,10 +191,10 @@ object DarwinCoreArchive {
                 append("        <geographicDescription>").append(xml(m.geographicDescription))
                 append("</geographicDescription>\n")
                 append("        <boundingCoordinates>\n")
-                append("          <westBoundingCoordinate>").append(m.westBound).append("</westBoundingCoordinate>\n")
-                append("          <eastBoundingCoordinate>").append(m.eastBound).append("</eastBoundingCoordinate>\n")
-                append("          <northBoundingCoordinate>").append(m.northBound).append("</northBoundingCoordinate>\n")
-                append("          <southBoundingCoordinate>").append(m.southBound).append("</southBoundingCoordinate>\n")
+                append("          <westBoundingCoordinate>").append(bound(m.westBound)).append("</westBoundingCoordinate>\n")
+                append("          <eastBoundingCoordinate>").append(bound(m.eastBound)).append("</eastBoundingCoordinate>\n")
+                append("          <northBoundingCoordinate>").append(bound(m.northBound)).append("</northBoundingCoordinate>\n")
+                append("          <southBoundingCoordinate>").append(bound(m.southBound)).append("</southBoundingCoordinate>\n")
                 append("        </boundingCoordinates>\n")
                 append("      </geographicCoverage>\n")
             }
@@ -216,10 +218,16 @@ object DarwinCoreArchive {
             append("    </coverage>\n")
         }
         append(party("contact", m))
-        if (m.methods.isNotBlank()) {
-            append("    <methods><methodStep><description><para>")
-            append(xml(m.methods))
-            append("</para></description></methodStep></methods>\n")
+        if (m.methods.isNotBlank() || m.softwareCitation.isNotBlank()) {
+            append("    <methods>")
+            if (m.methods.isNotBlank()) {
+                append("<methodStep><description><para>").append(xml(m.methods)).append("</para></description></methodStep>")
+            }
+            // O aplicativo usado na coleta, com a forma de citar.
+            if (m.softwareCitation.isNotBlank()) {
+                append("<methodStep><description><para>").append(xml(m.softwareCitation)).append("</para></description></methodStep>")
+            }
+            append("</methods>\n")
         }
         append("  </dataset>\n")
         append("</eml:eml>\n")
@@ -250,7 +258,14 @@ object DarwinCoreArchive {
         else -> "<para>Licença ainda não definida pelo detentor dos dados. Defina CC0, CC BY 4.0 ou CC BY-NC 4.0 no projeto antes de publicar.</para>"
     }
 
-    private fun xml(value: String): String = value
+    /**
+     * Coordenada do retangulo como xs:decimal. append(Double) escrevia
+     * "9.0E-4" perto do equador ou de Greenwich, o que o esquema do EML recusa.
+     */
+    private fun bound(value: Double?): String =
+        value?.let { java.math.BigDecimal(it).setScale(6, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString() }.orEmpty()
+
+    private fun xml(value: String): String = xmlSafe(value)
         .replace("&", "&amp;")
         .replace("<", "&lt;")
         .replace(">", "&gt;")

@@ -217,6 +217,7 @@ object DarwinCoreCatalog {
         DarwinCoreField("taxonRank", "Nível taxonômico", "Taxon rank", "Taxonomia", enabled = false, order = 29, vocabulary = DwcVocabulary.taxonRank),
         DarwinCoreField("higherClassification", "Classificação superior", "Higher classification", "Taxonomia", enabled = false, order = 30),
         DarwinCoreField("taxonRemarks", "Observações taxonômicas", "Taxon remarks", "Taxonomia", "long_text", enabled = false, order = 31),
+        DarwinCoreField("nameAccordingTo", "Lista de referência do nome", "Name according to", "Taxonomia", enabled = false, order = 32),
         DarwinCoreField("verbatimIdentification", "Identificação como anotada", "Verbatim identification", "Identificação", enabled = false, order = 54),
         DarwinCoreField("identificationVerificationStatus", "Status de verificação", "Identification verification status", "Identificação", enabled = false, order = 55, vocabulary = DwcVocabulary.identificationVerificationStatus)
     )
@@ -244,7 +245,10 @@ object DarwinCoreCatalog {
         DarwinCoreField("countryCode", "Código do país", "Country code", "Georreferenciamento", enabled = false, order = 288),
         DarwinCoreField("locationRemarks", "Observações da localidade", "Location remarks", "Georreferenciamento", "long_text", enabled = false, order = 289),
         DarwinCoreField("waterBody", "Corpo d'água", "Water body", "Georreferenciamento", enabled = false, order = 290),
-        DarwinCoreField("island", "Ilha", "Island", "Georreferenciamento", enabled = false, order = 291)
+        DarwinCoreField("island", "Ilha", "Island", "Georreferenciamento", enabled = false, order = 291),
+        // Preenchido pela captura de GPS: a altitude sai do elipsoide para o
+        // nivel do mar pelo geoide EGM2008.
+        DarwinCoreField("verticalDatum", "Datum vertical da altitude", "Vertical datum", "Georreferenciamento", enabled = false, order = 292)
     )
 
     /** Autoria e crédito. */
@@ -312,9 +316,14 @@ object DarwinCoreCatalog {
     val coreOccurrenceTerms = listOf(
         "occurrenceID",
         "eventID",
+        "recordNumber",
         "basisOfRecord",
         "occurrenceStatus",
         "scientificName",
+        // Preenchidos pelo autocompletar das listas de especies.
+        "scientificNameAuthorship",
+        "nameAccordingTo",
+        "verbatimIdentification",
         "vernacularName",
         "taxonRank",
         "kingdom",
@@ -324,6 +333,7 @@ object DarwinCoreCatalog {
         "family",
         "genus",
         "specificEpithet",
+        "infraspecificEpithet",
         "individualCount",
         "sex",
         "lifeStage",
@@ -350,8 +360,13 @@ object DarwinCoreCatalog {
         "decimalLongitude",
         "coordinateUncertaintyInMeters",
         "geodeticDatum",
+        // Preenchidos pela captura de GPS: como a incerteza foi calculada
+        // (guia do GBIF) e como a coordenada foi obtida.
+        "georeferenceProtocol",
+        "georeferenceRemarks",
         "minimumElevationInMeters",
         "occurrenceRemarks",
+        "fieldNotes",
         "associatedMedia",
         "associatedReferences",
         "associatedSequences",

@@ -11,7 +11,7 @@ Aplicativo Android nativo em Kotlin + Jetpack Compose para coleta ecologica e bi
 - Estrutura de trilha GPS de expedição com pontos exportáveis como CSV e GeoJSON LineString.
 - Ocorrências biológicas mapeadas para `Occurrence`, `Taxon`, `Identification`, `Location` e campos dinâmicos.
 - Mídias locais de foto e áudio como entidades separadas, sem salvar binários no SQLite.
-- Áudio padrão em WAV; o projeto também guarda preferência alternativa MP3.
+- Áudio gravado só em WAV (PCM 16 bits, 44,1 kHz, mono), sem compressão; arquivos MP3, M4A e outros podem ser anexados.
 - Captura de GPS com latitude, longitude, altitude, precisao, datum e edicao manual.
 - Datum padrão `SIRGAS 2000`, com suporte também a `WGS84`.
 - Coordenadas armazenadas internamente em graus decimais.

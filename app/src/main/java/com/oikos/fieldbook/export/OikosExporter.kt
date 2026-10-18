@@ -6,6 +6,7 @@ import com.oikos.fieldbook.data.OccurrenceEntity
 import com.oikos.fieldbook.data.ProjectEntity
 import com.oikos.fieldbook.data.SessionEntity
 import com.oikos.fieldbook.dwc.DarwinCoreCatalog
+import com.oikos.fieldbook.services.MediaKind
 import com.oikos.fieldbook.util.CoordinateUtils
 import com.oikos.fieldbook.util.UtmHemisphere
 import com.oikos.fieldbook.util.parseFlatJsonMap
@@ -24,7 +25,8 @@ import java.util.Locale
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
-class OikosExporter {
+/** [appVersion] entra na citacao do aplicativo (COMO_CITAR.txt, eml.xml, resumo da planilha). */
+class OikosExporter(private val appVersion: String = com.oikos.fieldbook.BuildConfig.VERSION_NAME) {
     /**
      * Gera a exportacao direto no arquivo devolvido por [destination].
      *
@@ -45,7 +47,7 @@ class OikosExporter {
         fileStem: String = safeName(project.name),
         destination: (String) -> File
     ): ExportResult {
-        val packageModel = ExportPackage(project, sessions, occurrences, media, fields, tracks, content)
+        val packageModel = ExportPackage(project, sessions, occurrences, media, fields, tracks, content, appVersion)
         val warnings = packageModel.validationWarnings(format)
         val stem = when (format) {
             ExportFormat.Zip -> "${fileStem}_${LocalDate.now()}"
@@ -88,11 +90,15 @@ private class ExportPackage(
     media: List<MediaEntity>,
     private val fields: List<FieldConfigEntity>,
     private val tracks: List<TrackExportBundle>,
-    private val content: ExportContent
+    private val content: ExportContent,
+    private val appVersion: String
 ) {
     private val sessionById = sessions.associateBy { it.id }
     private val occurrenceById = occurrences.associateBy { it.id }
-    private val includedMedia = media.filter {
+    // Ordem fixa (mais antiga primeiro): antes vinha da mais nova, e uma foto
+    // nova mudava o numero -01/-02 das anteriores a cada exportacao.
+    private val allMedia = media.sortedBy { it.id }
+    private val includedMedia = allMedia.filter {
         when (content) {
             ExportContent.MediaOnly -> true
             ExportContent.SpreadsheetsOnly -> false
@@ -103,6 +109,71 @@ private class ExportPackage(
     }
     private val mediaLinks = buildMediaLinks(includedMedia)
     private val linksByOccurrence = mediaLinks.filter { it.occurrenceInternalId != null }.groupBy { it.occurrenceInternalId }
+
+    /**
+     * O Darwin Core Archive descreve todas as midias, qualquer que seja o
+     * "Conteudo" escolhido: antes, "Apenas planilhas" tirava do archive as
+     * condicoes de gravacao (temperatura, umidade, distancia) de cada audio.
+     */
+    private val archiveMediaLinks = if (includedMedia.size == allMedia.size) mediaLinks else buildMediaLinks(allMedia)
+
+    /** Termos numericos (catalogo ou campo configurado como numero). */
+    private val numericTerms: Set<String> =
+        DarwinCoreCatalog.byTerm.values.filter { it.type == "decimal" || it.type == "integer" }.map { it.term }.toSet() +
+            fields.filter { it.fieldType == "decimal" || it.fieldType == "integer" }.map { it.dwcTerm } +
+            setOf("measurementValue", "measurementAccuracy")
+
+    /** Colunas em que o CSV brasileiro troca o ponto decimal por virgula. */
+    private val numericColumns: Set<String> = numericTerms + setOf(
+        "decimalLatitude", "decimalLongitude", "coordinateUncertaintyInMeters", "minimumElevationInMeters",
+        "individualCount", "altitude", "accuracy", "speed", "totalDistance", "durationSeconds",
+        "airTemperature", "relativeHumidity", "distanceToSourceMeters", "sampleSizeValue", "utmEasting", "utmNorthing"
+    )
+
+    /**
+     * "12,4" digitado num campo numerico sai "12.4". O formulario guarda o
+     * texto como foi digitado, e o GBIF nao le virgula decimal.
+     */
+    private fun normalized(term: String, value: String): String {
+        val trimmed = value.trim()
+        return if (term in numericTerms && COMMA_DECIMAL.matches(trimmed)) trimmed.replace(',', '.') else value
+    }
+
+    /** Coordenada do registro e o que so vale junto com ela. */
+    private data class RecordPlace(val latitude: Double?, val longitude: Double?, val uncertainty: Double?, val altitude: Double?, val datum: String)
+
+    /**
+     * Sem coordenada propria, o registro usa o ponto da expedicao com a
+     * incerteza e o datum DELE. Antes cada campo herdava sozinho: um ponto
+     * digitado de um GPS de mao, sem precisao informada, saia com a precisao e
+     * a altitude do acampamento.
+     */
+    private fun placeOf(occurrence: OccurrenceEntity, session: SessionEntity?): RecordPlace = when {
+        occurrence.latitude != null && occurrence.longitude != null -> RecordPlace(
+            occurrence.latitude, occurrence.longitude, occurrence.coordinateUncertaintyInMeters, occurrence.altitude,
+            occurrence.geodeticDatum.ifBlank { project.defaultDatum }
+        )
+        session?.latitude != null && session.longitude != null -> RecordPlace(
+            session.latitude, session.longitude, session.coordinateUncertaintyInMeters, occurrence.altitude ?: session.altitude,
+            session.geodeticDatum.ifBlank { project.defaultDatum }
+        )
+        else -> RecordPlace(null, null, null, occurrence.altitude, occurrence.geodeticDatum.ifBlank { project.defaultDatum })
+    }
+
+    /** Data do registro; sem data propria, a da expedicao. */
+    private fun eventDateOf(occurrence: OccurrenceEntity, session: SessionEntity?, dynamic: Map<String, String> = parseFlatJsonMap(occurrence.dynamicFieldsJson)): String =
+        dynamic["eventDate"].orEmpty().ifBlank { session?.eventDate.orEmpty() }
+
+    /**
+     * Termos Darwin Core com valor em algum registro, mesmo com o campo
+     * desligado no formulario: antes viravam MeasurementOrFact no archive
+     * (por exemplo "Infraspecific epithet" de toda subespecie).
+     */
+    private val standardTermsWithData: List<String> by lazy {
+        occurrences.flatMap { occurrence -> parseFlatJsonMap(occurrence.dynamicFieldsJson).filterValues { it.isNotBlank() }.keys }
+            .distinct()
+            .filter { it in DarwinCoreCatalog.byTerm && it !in DarwinCoreCatalog.nonCoreTerms }
+    }
 
     fun occurrencesCsv(): String = csv(occurrenceHeaders(), occurrences.map { occurrence ->
         val session = sessionById[occurrence.sessionId]
@@ -126,7 +197,7 @@ private class ExportPackage(
                 "decimalLongitude" to decimal(point.longitude),
                 "altitude" to decimal(point.altitude),
                 "accuracy" to decimal(point.accuracy),
-                "timestamp" to millis(point.timestamp),
+                "timestamp" to knownTime(point.timestamp),
                 "speed" to decimal(point.speed),
                 "geodeticDatum" to track.geodeticDatum
             ).withVerbatim(point.latitude, point.longitude, track.geodeticDatum)
@@ -149,6 +220,7 @@ private class ExportPackage(
         }))
         root.put("fieldConfig", JSONArray(fields.map { JSONObject(fieldMap(it)) }))
         root.put("gpsTracks", JSONArray(tracks.map { JSONObject(trackMap(it)) }))
+        root.put("softwareCitation", AppCitation.apa(appVersion))
         return root.toString(2)
     }
 
@@ -160,23 +232,29 @@ private class ExportPackage(
 
     fun geoJson(): String {
         val features = JSONArray()
-        occurrences.filter { it.latitude != null && it.longitude != null }.forEach { occurrence ->
+        // Mesma coordenada das planilhas: a propria ou, sem ela, a da expedicao.
+        occurrences.forEach { occurrence ->
             val session = sessionById[occurrence.sessionId]
+            val place = placeOf(occurrence, session)
+            if (place.latitude == null || place.longitude == null) return@forEach
             val links = linksByOccurrence[occurrence.id].orEmpty()
             val properties = JSONObject()
                 .put("occurrenceID", occurrence.occurrenceId)
                 .put("eventID", session?.eventId.orEmpty())
                 .put("scientificName", occurrence.scientificName)
-                .put("eventDate", session?.eventDate.orEmpty())
+                // Data do registro, nao a da expedicao (antes era sempre a da expedicao).
+                .put("eventDate", eventDateOf(occurrence, session))
+                .put("coordinateUncertaintyInMeters", decimal(place.uncertainty))
+                .put("geodeticDatum", place.datum)
                 .put("associatedMedia", associatedMedia(links))
                 .put("mediaCount", links.size)
                 .put("photoCount", links.count { it.type == "photo" })
                 .put("audioCount", links.count { it.type == "audio" })
-            linkedMapOf<String, String>().withVerbatim(occurrence.latitude, occurrence.longitude, occurrence.geodeticDatum)
+            linkedMapOf<String, String>().withVerbatim(place.latitude, place.longitude, place.datum)
                 .forEach { (key, value) -> properties.put(key, value) }
             val geometry = JSONObject()
                 .put("type", "Point")
-                .put("coordinates", JSONArray(listOf(occurrence.longitude, occurrence.latitude)))
+                .put("coordinates", JSONArray(listOf(place.longitude, place.latitude)))
             features.put(JSONObject().put("type", "Feature").put("geometry", geometry).put("properties", properties))
         }
         tracks.filter { it.points.size >= 2 }.forEach { track ->
@@ -203,7 +281,8 @@ private class ExportPackage(
                         listOf("exportedAt", exportedAt()),
                         listOf("photos", mediaLinks.count { it.type == "photo" }.toString()),
                         listOf("audios", mediaLinks.count { it.type == "audio" }.toString()),
-                        listOf("warnings", validationWarnings())
+                        listOf("warnings", validationWarnings()),
+                        listOf("comoCitarOApp", AppCitation.apa(appVersion))
                     )
                 )
             )
@@ -235,7 +314,8 @@ private class ExportPackage(
                 listOf("coordinateStorage", "Graus Decimais"),
                 listOf("utmColumns", if (project.coordinateFormat == "UTM") "Incluídas nas planilhas e properties do GeoJSON" else "Não aplicável"),
                 listOf("geodeticDatum", project.defaultDatum),
-                listOf("warnings", validationWarnings())
+                listOf("warnings", validationWarnings()),
+                listOf("comoCitarOApp", AppCitation.apa(appVersion))
             )
         )
         return XlsxWriter.write(sheets)
@@ -245,6 +325,7 @@ private class ExportPackage(
         val root = "Projeto_${OikosExporter.safeName(project.name)}"
         ZipOutputStream(output).use { zip ->
             zip.put("$root/README.txt", readme())
+            zip.put("$root/COMO_CITAR.txt", AppCitation.readme(appVersion))
             zip.put("$root/manifest.json", manifestJson())
             if (content != ExportContent.MediaOnly) {
                 zip.put("$root/01_planilha_principal/ocorrencias_darwin_core.csv", occurrencesCsv())
@@ -285,8 +366,15 @@ private class ExportPackage(
         val cabecalhoCore = occurrenceHeaders()
             .filterNot { it in DarwinCoreCatalog.nonCoreTerms }
             .filterNot { it in auxiliares }
+        val baseUrl = project.mediaBaseUrl.trim().trimEnd('/')
+        val archiveLinksByOccurrence = archiveMediaLinks.filter { it.occurrenceInternalId != null }.groupBy { it.occurrenceInternalId }
+        // associatedMedia no archive leva os mesmos links publicos da extensao
+        // de multimidia. Antes levava caminhos do ZIP completo ("05_midias/..."),
+        // que nem existem dentro do dwca.zip e o GBIF tentava ler como URL.
         val linhasCore = occurrences.map { occurrence ->
-            occurrenceMap(sessionById[occurrence.sessionId], occurrence, linksByOccurrence[occurrence.id].orEmpty())
+            occurrenceMap(sessionById[occurrence.sessionId], occurrence, emptyList()).toMutableMap().apply {
+                this["associatedMedia"] = if (baseUrl.isBlank()) "" else archiveLinksByOccurrence[occurrence.id].orEmpty().joinToString(" | ") { publicUrl(baseUrl, it) }
+            }
         }
 
         // Tudo que ficou de fora do core e tem valor vira MeasurementOrFact.
@@ -301,13 +389,13 @@ private class ExportPackage(
                     mapOf(
                         "occurrenceID" to occurrence.occurrenceId,
                         "measurementType" to (DarwinCoreCatalog.byTerm[termo]?.labelEn ?: termo),
-                        "measurementValue" to valor,
+                        "measurementValue" to normalized(termo, valor),
                         "measurementUnit" to unitForMeasurement(termo),
                         "measurementRemarks" to "Oikos FieldBook: $termo"
                     )
                 }
             val medidaDeclarada = dinamicos["measurementType"].orEmpty()
-            val valorDeclarado = dinamicos["measurementValue"].orEmpty()
+            val valorDeclarado = normalized("measurementValue", dinamicos["measurementValue"].orEmpty())
             val declarada = if (medidaDeclarada.isNotBlank() && valorDeclarado.isNotBlank()) {
                 listOf(
                     mapOf(
@@ -318,34 +406,55 @@ private class ExportPackage(
                         "measurementMethod" to dinamicos["measurementMethod"].orEmpty(),
                         "measurementDeterminedBy" to dinamicos["measurementDeterminedBy"].orEmpty(),
                         "measurementDeterminedDate" to dinamicos["measurementDeterminedDate"].orEmpty(),
-                        "measurementAccuracy" to dinamicos["measurementAccuracy"].orEmpty(),
+                        "measurementAccuracy" to normalized("measurementAccuracy", dinamicos["measurementAccuracy"].orEmpty()),
                         "measurementRemarks" to ""
                     )
                 )
             } else emptyList()
             atributos + declarada
+        } + archiveLinksByOccurrence.values.flatten().flatMap { link ->
+            // Condicoes de cada gravacao viram medidas ligadas a ocorrencia:
+            // temperatura e umidade alteram parametros de vocalizacao.
+            listOfNotNull(
+                link.airTemperature.takeIf { it.isNotBlank() }?.let { Triple("air temperature during audio recording", it, "°C") },
+                link.relativeHumidity.takeIf { it.isNotBlank() }?.let { Triple("relative humidity during audio recording", it, "%") },
+                link.distanceToSourceMeters.takeIf { it.isNotBlank() }?.let { Triple("distance to sound source", it, "m") }
+            ).map { (type, value, unit) ->
+                mapOf(
+                    "occurrenceID" to link.occurrenceID,
+                    "measurementType" to type,
+                    "measurementValue" to value,
+                    "measurementUnit" to unit,
+                    "measurementRemarks" to "Oikos FieldBook: gravação ${link.fileName}"
+                )
+            }
         }
 
         // A extensao de multimidia exige URL publica (dc:identifier); caminho
         // dentro do ZIP nao resolve em lugar nenhum. Sem URL base no projeto,
         // a extensao fica de fora e a exportacao avisa.
-        val baseUrl = project.mediaBaseUrl.trim().trimEnd('/')
-        val linhasMidia = if (baseUrl.isBlank()) emptyList() else mediaLinks
+        val linhasMidia = if (baseUrl.isBlank()) emptyList() else archiveMediaLinks
             .filter { it.occurrenceID.isNotBlank() }
             .map { link ->
                 mapOf(
                     "occurrenceID" to link.occurrenceID,
                     "type" to if (link.type == "audio") "Sound" else "StillImage",
                     "format" to link.mimeType,
-                    "identifier" to "$baseUrl/${java.net.URLEncoder.encode(link.fileName, "UTF-8").replace("+", "%20")}",
+                    "identifier" to publicUrl(baseUrl, link),
                     "title" to link.mediaSubject,
-                    "description" to link.caption,
+                    "description" to listOf(link.caption, link.technicalSummary()).filter { it.isNotBlank() }.joinToString(" | "),
                     "created" to link.capturedAt
                 )
             }
 
-        val comCoordenada = occurrences.filter { it.latitude != null && it.longitude != null }
-        val datas = sessions.map { it.eventDate }.filter { it.isNotBlank() }.sorted()
+        // Retangulo com as mesmas coordenadas do core (inclusive as herdadas da
+        // expedicao) e datas dos registros, nao so das expedicoes.
+        val pontos = occurrences.map { placeOf(it, sessionById[it.sessionId]) }.filter { it.latitude != null && it.longitude != null }
+        val datas = (sessions.map { it.eventDate } + occurrences.map { eventDateOf(it, sessionById[it.sessionId]) })
+            .flatMap { it.split('/') }
+            .map { it.trim().take(10) }
+            .filter { DATE_ONLY.matches(it) }
+            .sorted()
 
         val metadata = ArchiveMetadata(
             datasetTitle = project.name,
@@ -366,13 +475,15 @@ private class ExportPackage(
                 .take(10)
                 .joinToString("; ")
                 .ifBlank { "Localidade nao informada." },
-            westBound = comCoordenada.minOfOrNull { it.longitude ?: 0.0 },
-            eastBound = comCoordenada.maxOfOrNull { it.longitude ?: 0.0 },
-            southBound = comCoordenada.minOfOrNull { it.latitude ?: 0.0 },
-            northBound = comCoordenada.maxOfOrNull { it.latitude ?: 0.0 },
+            language = if (project.language.startsWith("en")) "eng" else "por",
+            westBound = pontos.minOfOrNull { it.longitude ?: 0.0 },
+            eastBound = pontos.maxOfOrNull { it.longitude ?: 0.0 },
+            southBound = pontos.minOfOrNull { it.latitude ?: 0.0 },
+            northBound = pontos.maxOfOrNull { it.latitude ?: 0.0 },
             beginDate = datas.firstOrNull().orEmpty(),
             endDate = datas.lastOrNull().orEmpty(),
-            taxa = occurrences.mapNotNull { it.scientificName.ifBlank { null } }.distinct().sorted()
+            taxa = occurrences.mapNotNull { it.scientificName.ifBlank { null } }.distinct().sorted(),
+            softwareCitation = "Dados registrados com o aplicativo Oikos FieldBook, versão $appVersion. " + AppCitation.apa(appVersion)
         )
 
         return DarwinCoreArchive.build(
@@ -399,8 +510,10 @@ private class ExportPackage(
         if (occurrences.isEmpty()) warnings += "Nenhuma ocorrência encontrada para exportar."
         val withoutId = occurrences.count { it.occurrenceId.isBlank() }
         if (withoutId > 0) warnings += "$withoutId ocorrência(s) sem occurrenceID."
-        val withoutCoordinates = occurrences.count { it.latitude == null || it.longitude == null }
-        if (withoutCoordinates > 0) warnings += "$withoutCoordinates ocorrência(s) sem coordenadas; elas não aparecem no GeoJSON."
+        val withoutCoordinates = occurrences.count { placeOf(it, sessionById[it.sessionId]).latitude == null }
+        if (withoutCoordinates > 0) warnings += "$withoutCoordinates ocorrência(s) sem coordenadas (nem própria, nem da expedição); elas não aparecem no GeoJSON."
+        val inherited = occurrences.count { (it.latitude == null || it.longitude == null) && placeOf(it, sessionById[it.sessionId]).latitude != null }
+        if (inherited > 0) warnings += "$inherited ocorrência(s) sem coordenada própria saem com o ponto da expedição."
         val emptyTracks = tracks.count { it.points.size < 2 }
         if (emptyTracks > 0) warnings += "$emptyTracks trilha(s) com menos de 2 pontos; elas aparecem no CSV, mas não formam LineString no GeoJSON."
         val missingMedia = mediaLinks.count { !File(it.sourcePath).exists() }
@@ -417,6 +530,7 @@ private class ExportPackage(
     private fun manifestJson(): String {
         val files = mutableListOf(
             "README.txt",
+            "COMO_CITAR.txt",
             "manifest.json",
             "02_tabelas_de_apoio/midias.csv"
         )
@@ -461,6 +575,7 @@ private class ExportPackage(
         Exportado em: ${exportedAt()}
         Datum: ${project.defaultDatum}
         Coordenadas internas/Darwin Core: Graus Decimais (decimalLatitude, decimalLongitude)
+        Altitude: metros sobre o nível do mar. O GPS mede a altura sobre o elipsoide WGS84; o app a converte pelo geoide EGM2008, e esses registros trazem verticalDatum = EGM2008.
         Formato configurado no projeto: ${project.coordinateFormat}
         ${if (project.coordinateFormat == "UTM") "Coordenadas UTM também aparecem em verbatimCoordinates, verbatimCoordinateSystem, verbatimSRS, utmZone, utmHemisphere, utmEasting e utmNorthing." else ""}
 
@@ -475,7 +590,9 @@ private class ExportPackage(
 
         Cada foto ou áudio está ligado a um registro por occurrenceID, ou a uma expedição por eventID.
         Consulte a coluna associatedMedia em 01_planilha_principal/ocorrencias_darwin_core.csv ou a tabela 02_tabelas_de_apoio/midias.csv.
+        Como citar o aplicativo: veja COMO_CITAR.txt.
         Quando houver mais de uma mídia, associatedMedia usa caminhos relativos separados por ponto e vírgula.
+        No Darwin Core Archive, associatedMedia e a extensão de multimídia usam a URL pública do projeto seguida do nome do arquivo: publique as fotos e os áudios de 05_midias/fotos e 05_midias/audios juntos, sem subpastas, nesse endereço (como num registro do Zenodo).
 
         Para QGIS:
         Abra 03_sig_qgis/ocorrencias_e_trilhas.geojson. A geometria usa Point em ordem longitude, latitude.
@@ -483,21 +600,24 @@ private class ExportPackage(
         Registros sem coordenadas permanecem nas planilhas, mas não aparecem no GeoJSON.
     """.trimIndent()
 
-    private fun occurrenceHeaders(): List<String> {
+    private fun occurrenceHeaders(): List<String> = occurrenceHeaderList
+
+    private val occurrenceHeaderList: List<String> by lazy {
         val configured = fields.filter { it.enabled }.map { it.dwcTerm }
         val utmHeaders = when (project.coordinateFormat) {
             "UTM" -> utmExportHeaders
             "DMS", "DMM" -> verbatimExportHeaders
             else -> emptyList()
         }
-        return (DarwinCoreCatalog.coreOccurrenceTerms + configured + utmHeaders + "associatedMedia").distinct()
+        (DarwinCoreCatalog.coreOccurrenceTerms + configured + standardTermsWithData + utmHeaders + "associatedMedia").distinct()
     }
 
     private fun occurrenceMap(session: SessionEntity?, occurrence: OccurrenceEntity, links: List<MediaLink>): Map<String, String> {
         val dynamic = parseFlatJsonMap(occurrence.dynamicFieldsJson)
-        val latitude = occurrence.latitude ?: session?.latitude
-        val longitude = occurrence.longitude ?: session?.longitude
-        val datum = occurrence.geodeticDatum.ifBlank { session?.geodeticDatum ?: project.defaultDatum }
+        val place = placeOf(occurrence, session)
+        val latitude = place.latitude
+        val longitude = place.longitude
+        val datum = place.datum
         val base = linkedMapOf(
             "occurrenceID" to occurrence.occurrenceId,
             "eventID" to session?.eventId.orEmpty(),
@@ -514,7 +634,7 @@ private class ExportPackage(
             "recordedBy" to occurrence.recordedBy.ifBlank { session?.recordedBy.orEmpty() },
             "identifiedBy" to occurrence.identifiedBy,
             "dateIdentified" to occurrence.dateIdentified,
-            "eventDate" to dynamic["eventDate"].orEmpty().ifBlank { session?.eventDate.orEmpty() },
+            "eventDate" to eventDateOf(occurrence, session, dynamic),
             "eventTime" to dynamic["eventTime"].orEmpty().ifBlank { session?.let { timeRange(it) }.orEmpty() },
             "samplingProtocol" to session?.samplingProtocol.orEmpty(),
             "samplingEffort" to session?.samplingEffort.orEmpty(),
@@ -525,15 +645,15 @@ private class ExportPackage(
             "country" to session?.country.orEmpty(),
             "decimalLatitude" to decimal(latitude),
             "decimalLongitude" to decimal(longitude),
-            "coordinateUncertaintyInMeters" to decimal(occurrence.coordinateUncertaintyInMeters ?: session?.coordinateUncertaintyInMeters),
+            "coordinateUncertaintyInMeters" to decimal(place.uncertainty),
             "geodeticDatum" to datum,
-            "minimumElevationInMeters" to decimal(occurrence.altitude ?: session?.altitude),
+            "minimumElevationInMeters" to decimal(place.altitude),
             "occurrenceRemarks" to occurrence.occurrenceRemarks,
             "fieldNotes" to occurrence.fieldNotes,
             "associatedMedia" to associatedMedia(links)
         )
         base.withVerbatim(latitude, longitude, datum)
-        dynamic.forEach { (key, value) -> base[key] = value }
+        dynamic.forEach { (key, value) -> base[key] = normalized(key, value) }
         fields.filter { it.enabled && !base.containsKey(it.dwcTerm) }.forEach { base[it.dwcTerm] = "" }
         return base
     }
@@ -569,8 +689,7 @@ private class ExportPackage(
         "language" to project.language,
         "defaultDatum" to project.defaultDatum,
         "coordinateFormat" to project.coordinateFormat,
-        "photoQuality" to project.photoQuality,
-        "audioFormat" to project.audioFormat
+        "photoQuality" to project.photoQuality
     )
 
     private fun fieldMap(field: FieldConfigEntity): Map<String, String> = mapOf(
@@ -587,10 +706,10 @@ private class ExportPackage(
         "trackID" to track.trackID,
         "projectID" to track.projectID,
         "eventID" to track.eventID,
-        "startTime" to millis(track.startTime),
+        "startTime" to knownTime(track.startTime),
         "endTime" to track.endTime?.let { millis(it) }.orEmpty(),
         "totalDistance" to decimal(track.totalDistance),
-        "duration" to track.duration.toString(),
+        "duration" to if (track.startTime > 0L) track.duration.toString() else "",
         "pointsCount" to track.pointsCount.toString(),
         "coordinateFormat" to track.coordinateFormat,
         "geodeticDatum" to track.geodeticDatum
@@ -607,7 +726,7 @@ private class ExportPackage(
                 "decimalLongitude" to decimal(point.longitude),
                 "altitude" to decimal(point.altitude),
                 "accuracy" to decimal(point.accuracy),
-                "timestamp" to millis(point.timestamp),
+                "timestamp" to knownTime(point.timestamp),
                 "speed" to decimal(point.speed),
                 "geodeticDatum" to track.geodeticDatum
             ).withVerbatim(point.latitude, point.longitude, track.geodeticDatum)
@@ -645,7 +764,11 @@ private class ExportPackage(
         // Decimetro: o metro com 8 casas sugeria uma precisao de micrometro.
         val easting = String.format(Locale.US, "%.1f", utm.easting)
         val northing = String.format(Locale.US, "%.1f", utm.northing)
-        this["verbatimCoordinates"] = "${utm.zone}${hemisphere} $easting $northing"
+        // Zona com a letra da faixa de latitude, como no exemplo do Darwin Core
+        // ("17T 630000 4833400"). Antes ia "23S" querendo dizer "sul", mas S e
+        // tambem a faixa de 32 a 40 graus NORTE; no archive, onde a coluna
+        // utmHemisphere nao entra, nada desfazia a ambiguidade.
+        this["verbatimCoordinates"] = "${utm.zone}${CoordinateUtils.utmBand(latitude ?: 0.0)} $easting $northing"
         this["utmZone"] = utm.zone.toString()
         this["utmHemisphere"] = hemisphere
         this["utmEasting"] = easting
@@ -668,7 +791,7 @@ private class ExportPackage(
                         "occurrenceID" to occurrence.occurrenceId,
                         "eventID" to sessionById[occurrence.sessionId]?.eventId.orEmpty(),
                         "measurementType" to key,
-                        "measurementValue" to value,
+                        "measurementValue" to normalized(key, value),
                         "measurementUnit" to unitForMeasurement(key),
                         "measurementRemarks" to "Campo dinamico opcional do Oikos FieldBook"
                     )
@@ -694,13 +817,13 @@ private class ExportPackage(
     }
 
     private fun buildMediaLinks(media: List<MediaEntity>): List<MediaLink> {
-        val counters = mutableMapOf<String, Int>()
         return media.map { item ->
             val occurrence = item.occurrenceId?.let { occurrenceById[it] }
             val session = sessionById[item.sessionId]
-            val extension = extensionFor(item)
+            val kind = kindFor(item)
+            val extension = extensionFor(item, kind)
             val folder = if (item.mediaType == "audio") "audios" else "fotos"
-            val fileName = uniqueMediaFileName(item, occurrence, session, extension, counters)
+            val fileName = uniqueMediaFileName(item, occurrence, session, extension)
             val relativePath = "05_midias/$folder/$fileName"
             MediaLink(
                 mediaID = "MED-${item.id.toString().padStart(6, '0')}",
@@ -712,8 +835,9 @@ private class ExportPackage(
                 type = item.mediaType,
                 fileName = fileName,
                 relativePath = relativePath,
-                mimeType = item.mimeType,
-                capturedAt = millis(item.createdAt),
+                mimeType = kind?.mime ?: item.mimeType,
+                // Em branco quando a data de captura nao e conhecida (arquivo importado sem data).
+                capturedAt = if (item.captureTimeKnown) millis(item.createdAt) else "",
                 decimalLatitude = decimal(item.latitude),
                 decimalLongitude = decimal(item.longitude),
                 coordinateUncertaintyInMeters = decimal(item.coordinateUncertaintyInMeters),
@@ -722,7 +846,17 @@ private class ExportPackage(
                 bodyPartOrPlantPart = item.bodyPartOrPlantPart,
                 behaviorContext = item.behaviorContext,
                 notes = item.notes,
-                sourcePath = item.filePath
+                sourcePath = item.filePath,
+                durationSeconds = item.durationMillis?.let { decimal(it / 1000.0) }.orEmpty(),
+                sampleRateHz = item.sampleRateHz?.toString().orEmpty(),
+                bitsPerSample = item.bitsPerSample?.toString().orEmpty(),
+                channels = item.channels?.toString().orEmpty(),
+                audioSource = item.audioSource,
+                captureDevice = item.captureDevice,
+                microphone = item.microphone,
+                airTemperature = decimal(item.airTemperature),
+                relativeHumidity = decimal(item.relativeHumidity),
+                distanceToSourceMeters = decimal(item.distanceToSourceMeters)
             )
         }
     }
@@ -731,25 +865,23 @@ private class ExportPackage(
         media: MediaEntity,
         occurrence: OccurrenceEntity?,
         session: SessionEntity?,
-        extension: String,
-        counters: MutableMap<String, Int>
+        extension: String
     ): String {
-        val base = exportMediaBaseName(media, occurrence, session)
-        val safeBase = safeToken(base)
-        val key = "$safeBase.$extension"
-        val number = (counters[key] ?: 0) + 1
-        counters[key] = number
-        return if (number == 1) {
-            "$safeBase.$extension"
-        } else {
-            "$safeBase-${number.toString().padStart(2, '0')}.$extension"
-        }
+        // A especie e a de AGORA: corrigir a identificacao antes de exportar
+        // renomeia o arquivo exportado. O numero da midia no fim (MED000123)
+        // nunca muda e torna o nome unico; antes era um contador -01/-02 que
+        // dependia da ordem das midias.
+        val base = safeToken(exportMediaBaseName(media, occurrence, session))
+        return "${base}_MED${media.id.toString().padStart(6, '0')}.$extension"
     }
 
     private fun exportMediaBaseName(media: MediaEntity, occurrence: OccurrenceEntity?, session: SessionEntity?): String {
-        val date = session?.eventDate?.takeIf { it.isNotBlank() } ?: millis(media.createdAt).take(10)
-        val time = DateTimeFormatter.ofPattern("HHmm", Locale.US)
-            .format(java.time.Instant.ofEpochMilli(media.createdAt).atZone(java.time.ZoneId.systemDefault()).toLocalTime())
+        // Data e hora da captura, no mesmo fuso (o do aparelho). Antes a data era
+        // a da expedicao (ou UTC) e a hora local: um registro noturno ganhava um
+        // instante que nao existiu.
+        val local = java.time.Instant.ofEpochMilli(media.createdAt).atZone(java.time.ZoneId.systemDefault())
+        val date = if (media.captureTimeKnown) local.toLocalDate().toString() else "SEM-DATA"
+        val time = if (media.captureTimeKnown) DateTimeFormatter.ofPattern("HHmm", Locale.US).format(local.toLocalTime()) else ""
         val area = projectAcronym(project.name)
         val expedition = shortCode(session?.name.orEmpty()).ifBlank { "EXPEDICAO" }
         val owner = if (occurrence != null) {
@@ -764,14 +896,34 @@ private class ExportPackage(
             .joinToString("_")
     }
 
-    private fun extensionFor(media: MediaEntity): String = when {
-        media.mediaType == "audio" && media.mimeType.contains("mpeg") -> "mp3"
-        media.mediaType == "audio" && media.fileName.endsWith(".mp3", true) -> "mp3"
-        media.mediaType == "audio" && media.fileName.endsWith(".wav", true) -> "wav"
-        media.mediaType == "audio" -> "wav"
-        media.fileName.endsWith(".png", true) -> "png"
-        else -> "jpg"
+    /**
+     * Extensao e tipo pelo conteudo do arquivo. Antes todo audio que nao fosse
+     * MP3 saia ".wav": um M4A importado ia com extensao errada e o Raven e
+     * programas parecidos recusavam o arquivo.
+     */
+    private fun kindFor(media: MediaEntity): MediaKind? = MediaKind.detect(File(media.filePath))
+
+    private fun extensionFor(media: MediaEntity, kind: MediaKind?): String {
+        kind?.let { return it.extension }
+        val own = media.fileName.substringAfterLast('.', "").lowercase(Locale.ROOT)
+        if (own in KNOWN_MEDIA_EXTENSIONS) return if (own == "jpeg") "jpg" else own
+        return when (media.mimeType.lowercase(Locale.ROOT)) {
+            "audio/mpeg" -> "mp3"
+            "audio/wav", "audio/x-wav" -> "wav"
+            "audio/mp4", "audio/m4a", "audio/x-m4a" -> "m4a"
+            "audio/aac" -> "aac"
+            "audio/ogg" -> "ogg"
+            "audio/flac" -> "flac"
+            "audio/amr" -> "amr"
+            "image/png" -> "png"
+            "image/webp" -> "webp"
+            "image/heic" -> "heic"
+            else -> if (media.mediaType == "audio") "wav" else "jpg"
+        }
     }
+
+    private fun publicUrl(baseUrl: String, link: MediaLink): String =
+        "$baseUrl/${java.net.URLEncoder.encode(link.fileName, "UTF-8").replace("+", "%20")}"
 
     private fun associatedMedia(links: List<MediaLink>): String = links.joinToString("; ") { it.relativePath }
 
@@ -795,7 +947,8 @@ private class ExportPackage(
         rows.forEach { row ->
             appendLine(headers.joinToString(separator) { header ->
                 val value = row[header].orEmpty()
-                csvCell(if (brazilian) brazilianDecimal(value) else value, separator)
+                // So colunas numericas: antes um fieldNumber "3.2" virava "3,2".
+                csvCell(if (brazilian && header in numericColumns) brazilianDecimal(value) else value, separator)
             })
         }
     }
@@ -808,6 +961,9 @@ private class ExportPackage(
 
     private fun exportedAt(): String = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
     private fun millis(value: Long): String = java.time.Instant.ofEpochMilli(value).toString()
+
+    /** Horario de trilha; 0 = trilha importada de arquivo sem horario, sai em branco. */
+    private fun knownTime(value: Long): String = if (value > 0L) millis(value) else ""
     private fun decimal(value: Double?): String = value?.let { String.format(Locale.US, "%.8f", it).trimEnd('0').trimEnd('.') }.orEmpty()
     private fun csvCell(value: String, separator: String): String {
         val escaped = value.replace("\"", "\"\"")
@@ -845,7 +1001,7 @@ private class ExportPackage(
         // bodyPartOrPlantPart, behaviorContext e notes saiam repetindo
         // literalmente mediaSubject e caption; a repeticao afirmava sobre o dado
         // algo que nao era verdade e foi removida da exportacao.
-        private val mediaHeaders = listOf("mediaID", "projectID", "eventID", "occurrenceID", "mediaType", "fileName", "relativePath", "mimeType", "capturedAt", "decimalLatitude", "decimalLongitude", "coordinateUncertaintyInMeters", "caption", "mediaSubject", "associatedMedia")
+        private val mediaHeaders = listOf("mediaID", "projectID", "eventID", "occurrenceID", "mediaType", "fileName", "relativePath", "mimeType", "capturedAt", "decimalLatitude", "decimalLongitude", "coordinateUncertaintyInMeters", "caption", "mediaSubject", "associatedMedia", "durationSeconds", "sampleRateHz", "bitsPerSample", "channels", "audioSource", "captureDevice", "microphone", "airTemperature", "relativeHumidity", "distanceToSourceMeters")
         private val trackPointHeaders = listOf("trackID", "projectID", "eventID", "pointIndex", "decimalLatitude", "decimalLongitude", "altitude", "accuracy", "timestamp", "speed", "geodeticDatum") + utmExportHeaders
         private val measurementHeaders = listOf("occurrenceID", "eventID", "measurementType", "measurementValue", "measurementUnit", "measurementRemarks")
 
@@ -854,6 +1010,13 @@ private class ExportPackage(
 
         /** Numero com ponto decimal, como o app grava internamente. */
         private val DECIMAL_NUMBER = Regex("^-?\\d+\\.\\d+$")
+
+        /** Numero com virgula decimal, como se digita em portugues. */
+        private val COMMA_DECIMAL = Regex("^-?\\d+,\\d+$")
+
+        private val DATE_ONLY = Regex("^\\d{4}-\\d{2}-\\d{2}$")
+
+        private val KNOWN_MEDIA_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp", "heic", "wav", "mp3", "m4a", "aac", "ogg", "flac", "amr")
 
         /** "12.5" vira "12,5" no CSV brasileiro; texto e inteiro ficam como estao. */
         fun brazilianDecimal(value: String): String =
@@ -893,8 +1056,29 @@ private data class MediaLink(
     val bodyPartOrPlantPart: String,
     val behaviorContext: String,
     val notes: String,
-    val sourcePath: String
+    val sourcePath: String,
+    val durationSeconds: String = "",
+    val sampleRateHz: String = "",
+    val bitsPerSample: String = "",
+    val channels: String = "",
+    val audioSource: String = "",
+    val captureDevice: String = "",
+    val microphone: String = "",
+    val airTemperature: String = "",
+    val relativeHumidity: String = "",
+    val distanceToSourceMeters: String = ""
 ) {
+    /** Parametros tecnicos em texto, para a descricao da midia no DwC-A. */
+    fun technicalSummary(): String = listOfNotNull(
+        durationSeconds.takeIf { it.isNotBlank() }?.let { "$it s" },
+        sampleRateHz.takeIf { it.isNotBlank() }?.let { "$it Hz" },
+        bitsPerSample.takeIf { it.isNotBlank() }?.let { "$it bit" },
+        channels.takeIf { it.isNotBlank() }?.let { "$it canal(is)" },
+        audioSource.takeIf { it.isNotBlank() }?.let { "fonte $it" },
+        captureDevice.takeIf { it.isNotBlank() },
+        microphone.takeIf { it.isNotBlank() }?.let { "microfone: $it" }
+    ).joinToString("; ")
+
     fun csvMap(): Map<String, String> = mapOf(
         "mediaID" to mediaID,
         "projectID" to projectID,
@@ -910,7 +1094,17 @@ private data class MediaLink(
         "coordinateUncertaintyInMeters" to coordinateUncertaintyInMeters,
         "caption" to caption,
         "mediaSubject" to mediaSubject,
-        "associatedMedia" to relativePath
+        "associatedMedia" to relativePath,
+        "durationSeconds" to durationSeconds,
+        "sampleRateHz" to sampleRateHz,
+        "bitsPerSample" to bitsPerSample,
+        "channels" to channels,
+        "audioSource" to audioSource,
+        "captureDevice" to captureDevice,
+        "microphone" to microphone,
+        "airTemperature" to airTemperature,
+        "relativeHumidity" to relativeHumidity,
+        "distanceToSourceMeters" to distanceToSourceMeters
     )
 
     fun manifestMap(): Map<String, String> = mapOf(
@@ -1001,12 +1195,15 @@ private object XlsxWriter {
      * milhar e sem notacao cientifica ambigua. Strings como "01" ou "2026-09-19"
      * continuam texto de proposito, para nao perder zeros a esquerda nem virar data.
      */
-    private fun isNumeric(value: String): Boolean {
-        if (value.isBlank()) return false
-        if (value.length > 1 && value.startsWith("0") && !value.startsWith("0.")) return false
-        if (value.startsWith("+")) return false
-        return value.toDoubleOrNull() != null && value.none { it == 'e' || it == 'E' }
-    }
+    private fun isNumeric(value: String): Boolean = STRICT_NUMBER.matches(value)
+
+    /**
+     * Antes valia qualquer coisa que o Kotlin aceitasse como Double: "5d",
+     * "12F", "NaN" e "Infinity" entravam como numero e o Excel recusava o
+     * arquivo. Inteiro com mais de 15 digitos (codigo de barras, tombo) fica
+     * texto, porque o Excel arredonda o resto.
+     */
+    private val STRICT_NUMBER = Regex("^-?(0|[1-9]\\d{0,14})(\\.\\d+)?$")
 
     private fun cellName(columnIndex: Int, rowIndex: Int): String {
         var n = columnIndex
@@ -1018,11 +1215,37 @@ private object XlsxWriter {
         return "$col${rowIndex + 1}"
     }
 
-    private fun xml(value: String): String = value
+    private fun xml(value: String): String = xmlSafe(value)
         .replace("&", "&amp;")
         .replace("<", "&lt;")
         .replace(">", "&gt;")
         .replace("\"", "&quot;")
         .replace("'", "&apos;")
+}
+
+/**
+ * Remove caracteres que o XML 1.0 nao admite (controles de U+0000 a U+001F,
+ * exceto tab, LF e CR; U+FFFE e U+FFFF; surrogates soltos). Um deles, colado
+ * de outro app, deixava a planilha corrompida ou o eml.xml invalido.
+ */
+internal fun xmlSafe(value: String): String {
+    if (value.none { it < ' ' || it in '\uD800'..'\uDFFF' || it == '￾' || it == '￿' }) return value
+    val out = StringBuilder(value.length)
+    var i = 0
+    while (i < value.length) {
+        val c = value[i]
+        when {
+            c == '\t' || c == '\n' || c == '\r' -> out.append(c)
+            c < ' ' || c == '￾' || c == '￿' -> Unit
+            Character.isHighSurrogate(c) && i + 1 < value.length && Character.isLowSurrogate(value[i + 1]) -> {
+                out.append(c).append(value[i + 1])
+                i++
+            }
+            Character.isSurrogate(c) -> Unit
+            else -> out.append(c)
+        }
+        i++
+    }
+    return out.toString()
 }
 

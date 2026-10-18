@@ -40,7 +40,8 @@ object TrackPointRules {
         if (seconds > 0 && distance / seconds > MAX_PLAUSIBLE_SPEED_METERS_PER_SECOND && accuracy > 15.0) {
             return TrackPointDecision(false, distance)
         }
-        return TrackPointDecision(true, distance)
+        // Ponto guardado so para marcar o tempo (parado): nao soma tremor do GPS a distancia.
+        return TrackPointDecision(true, if (distance < MIN_DISTANCE_METERS) 0.0 else distance)
     }
 }
 

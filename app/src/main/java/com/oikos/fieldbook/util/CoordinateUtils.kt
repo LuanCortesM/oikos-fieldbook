@@ -15,6 +15,11 @@ object CoordinateUtils {
     private const val FALSE_EASTING = 500000.0
     private const val FALSE_NORTHING = 10000000.0
 
+    private val HEMISPHERE_WORDS = listOf(
+        "NORTE" to "N", "NORTH" to "N", "SUL" to "S", "SOUTH" to "S",
+        "LESTE" to "L", "EAST" to "E", "OESTE" to "O", "WEST" to "W"
+    )
+
     fun validLatitude(value: Double?): Boolean = value == null || value in -90.0..90.0
     fun validLongitude(value: Double?): Boolean = value == null || value in -180.0..180.0
 
@@ -36,17 +41,25 @@ object CoordinateUtils {
      * Le coordenada em graus/minutos/segundos ou graus e minutos decimais,
      * como se anota em caderneta ou se le em GPS de mao:
      * 22°25'51.6"S, 22 25 51.6 S, S 22 25.86, -22 25.86, 44°58'44"O.
-     * Aceita N/S/E/W e tambem L (leste) e O (oeste). Virgula decimal tambem.
+     * Aceita N/S/E/W e tambem L (leste) e O (oeste), ou as palavras (Sul,
+     * Oeste...). Virgula decimal tambem.
+     *
+     * O hemisferio (letra ou sinal de menos) e obrigatorio: sem ele, "22 25 51.6"
+     * virava +22,43, um ponto no Hemisferio Norte, sem nenhum aviso.
      */
     fun parseSexagesimal(text: String, axis: Axis): Double? {
-        val raw = text.trim().uppercase(Locale.ROOT).replace(',', '.')
+        var raw = text.trim().uppercase(Locale.ROOT).replace(',', '.')
         if (raw.isBlank()) return null
+        HEMISPHERE_WORDS.forEach { (word, letter) -> raw = raw.replace(Regex("\\b$word\\b"), letter) }
         val hemisphere = Regex("[NSEWLO]").findAll(raw).map { it.value }.toList()
         if (hemisphere.size > 1) return null
         val letter = hemisphere.firstOrNull()
         val validLetters = if (axis == Axis.Latitude) setOf("N", "S") else setOf("E", "W", "L", "O")
         if (letter != null && letter !in validLetters) return null
-        val negative = raw.trimStart().startsWith("-") || letter in setOf("S", "W", "O")
+        val minus = raw.trimStart().startsWith("-")
+        if (letter == null && !minus) return null
+        if (minus && letter in setOf("N", "E", "L")) return null
+        val negative = minus || letter in setOf("S", "W", "O")
         val numbers = Regex("\\d+(?:\\.\\d+)?").findAll(raw).map { it.value.toDouble() }.toList()
         if (numbers.isEmpty() || numbers.size > 3) return null
         val degrees = numbers[0]
@@ -84,9 +97,40 @@ object CoordinateUtils {
         }
     }
 
+    /**
+     * Zona UTM, com as excecoes da Noruega (32V) e de Svalbard (31X a 37X).
+     * Longitude 180 fica na zona 60: antes dava 61, que nao existe.
+     */
+    fun utmZone(latitude: Double, longitude: Double): Int {
+        var zone = (((longitude + 180.0) / 6.0).toInt() + 1).coerceIn(1, 60)
+        if (latitude >= 56.0 && latitude < 64.0 && longitude >= 3.0 && longitude < 12.0) zone = 32
+        if (latitude >= 72.0 && latitude <= 84.0) {
+            zone = when {
+                longitude >= 0.0 && longitude < 9.0 -> 31
+                longitude >= 9.0 && longitude < 21.0 -> 33
+                longitude >= 21.0 && longitude < 33.0 -> 35
+                longitude >= 33.0 && longitude < 42.0 -> 37
+                else -> zone
+            }
+        }
+        return zone
+    }
+
+    /**
+     * Letra da faixa de latitude UTM (C a X, sem I e O), de 8 em 8 graus a
+     * partir de 80 S; a faixa X vai de 72 a 84 N. Fora disso (regioes polares,
+     * sistema UPS) nao ha faixa.
+     */
+    fun utmBand(latitude: Double): String {
+        if (latitude < -80.0 || latitude > 84.0) return ""
+        val bands = "CDEFGHJKLMNPQRSTUVWX"
+        val index = ((latitude + 80.0) / 8.0).toInt().coerceIn(0, bands.length - 1)
+        return bands[index].toString()
+    }
+
     fun toUtm(latitude: Double?, longitude: Double?): UtmCoordinate? {
         if (latitude == null || longitude == null || !validLatitude(latitude) || !validLongitude(longitude)) return null
-        val zone = ((longitude + 180.0) / 6.0).toInt() + 1
+        val zone = utmZone(latitude, longitude)
         val hemisphere = if (latitude < 0) UtmHemisphere.South else UtmHemisphere.North
         val latRad = Math.toRadians(latitude)
         val lonRad = Math.toRadians(longitude)

@@ -61,6 +61,14 @@ class FormState internal constructor(
         dirty = false
     }
 
+    /** Volta ao estado de formulario novo ("Salvar e novo"); a tela recarrega os padroes. */
+    fun reset() {
+        values.clear()
+        pendingMedia = emptyList()
+        initialized = false
+        dirty = false
+    }
+
     /** Delegacao: `var nome by form.field("nome")`. */
     fun field(key: String): ReadWriteProperty<Any?, String> = object : ReadWriteProperty<Any?, String> {
         override fun getValue(thisRef: Any?, property: KProperty<*>): String = get(key)
@@ -106,7 +114,21 @@ class FormState internal constructor(
                 .put("caption", item.caption)
                 .put("mediaSubject", item.mediaSubject)
                 .put("notes", item.notes)
+                .put("durationMillis", item.durationMillis ?: JSONObject.NULL)
+                .put("sampleRateHz", item.sampleRateHz ?: JSONObject.NULL)
+                .put("bitsPerSample", item.bitsPerSample ?: JSONObject.NULL)
+                .put("channels", item.channels ?: JSONObject.NULL)
+                .put("audioSource", item.audioSource)
+                .put("captureDevice", item.captureDevice)
+                .put("microphone", item.microphone)
+                .put("airTemperature", item.airTemperature ?: JSONObject.NULL)
+                .put("relativeHumidity", item.relativeHumidity ?: JSONObject.NULL)
+                .put("distanceToSourceMeters", item.distanceToSourceMeters ?: JSONObject.NULL)
         }).toString()
+
+        private fun JSONObject.optLongOrNull(key: String): Long? = if (has(key) && !isNull(key)) getLong(key) else null
+        private fun JSONObject.optIntOrNull(key: String): Int? = if (has(key) && !isNull(key)) getInt(key) else null
+        private fun JSONObject.optDoubleOrNull(key: String): Double? = if (has(key) && !isNull(key)) getDouble(key) else null
 
         private fun jsonToMedia(json: String): List<MediaEntity> = runCatching {
             val array = JSONArray(json)
@@ -124,7 +146,17 @@ class FormState internal constructor(
                     longitude = if (obj.isNull("longitude")) null else obj.getDouble("longitude"),
                     caption = obj.optString("caption"),
                     mediaSubject = obj.optString("mediaSubject"),
-                    notes = obj.optString("notes")
+                    notes = obj.optString("notes"),
+                    durationMillis = obj.optLongOrNull("durationMillis"),
+                    sampleRateHz = obj.optIntOrNull("sampleRateHz"),
+                    bitsPerSample = obj.optIntOrNull("bitsPerSample"),
+                    channels = obj.optIntOrNull("channels"),
+                    audioSource = obj.optString("audioSource"),
+                    captureDevice = obj.optString("captureDevice"),
+                    microphone = obj.optString("microphone"),
+                    airTemperature = obj.optDoubleOrNull("airTemperature"),
+                    relativeHumidity = obj.optDoubleOrNull("relativeHumidity"),
+                    distanceToSourceMeters = obj.optDoubleOrNull("distanceToSourceMeters")
                 )
             }
         }.getOrDefault(emptyList())

@@ -1,10 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Backup na nuvem do Android: limite de 25 MB por app; passando disso o Android
+  nao faz backup de nada, nem dos registros. Por isso vao so o banco do caderno
+  (texto, pequeno) e as configuracoes. Fotos, audios, mapas offline e listas de
+  especies ficam com o backup do proprio app (Configuracoes > Backup), que nao
+  tem limite. A transferencia entre aparelhos nao tem cota e leva tudo.
+-->
 <data-extraction-rules>
     <cloud-backup>
-        <include domain="database" path="." />
-        <include domain="file" path="." />
+        <include domain="database" path="oikos_fieldbook.db" />
+        <include domain="database" path="oikos_fieldbook.db-wal" />
+        <include domain="sharedpref" path="." />
     </cloud-backup>
     <device-transfer>
         <include domain="database" path="." />
         <include domain="file" path="." />
+        <include domain="sharedpref" path="." />
+        <exclude domain="file" path="restore-staging" />
+        <exclude domain="file" path="restore-safety" />
     </device-transfer>
 </data-extraction-rules>

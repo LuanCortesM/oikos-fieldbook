@@ -104,10 +104,14 @@ dependencies {
     implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("org.osmdroid:osmdroid-android:6.1.20")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    // QR code das etiquetas de herbario (so o nucleo do ZXing, Apache 2.0).
+    implementation("com.google.zxing:core:3.5.3")
 
     ksp("androidx.room:room-compiler:$roomVersion")
 
     testImplementation("junit:junit:4.13.2")
+    // JSON de verdade nos testes da JVM: o android.jar dos testes so tem stubs.
+    testImplementation("org.json:json:20231013")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.room:room-testing:$roomVersion")

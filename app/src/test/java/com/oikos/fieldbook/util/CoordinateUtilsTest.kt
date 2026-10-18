@@ -57,6 +57,21 @@ class CoordinateUtilsTest {
     }
 
     @Test
+    fun `sem hemisferio nem sinal a coordenada e recusada`() {
+        // Antes virava +22,43: um ponto no Hemisferio Norte, sem aviso.
+        assertNull(CoordinateUtils.parseSexagesimal("22 25 51.6", Axis.Latitude))
+        assertNull(CoordinateUtils.parseSexagesimal("44 58.74", Axis.Longitude))
+        assertNull("sinal e letra contraditorios", CoordinateUtils.parseSexagesimal("-22 25 51.6 N", Axis.Latitude))
+    }
+
+    @Test
+    fun `hemisferio por extenso`() {
+        close(-(22 + 25 / 60.0 + 51.6 / 3600.0), CoordinateUtils.parseSexagesimal("22 25 51.6 Sul", Axis.Latitude))
+        close(-(44 + 58 / 60.0 + 44 / 3600.0), CoordinateUtils.parseSexagesimal("44 58 44 Oeste", Axis.Longitude))
+        close(44 + 58 / 60.0 + 44 / 3600.0, CoordinateUtils.parseSexagesimal("44 58 44 leste", Axis.Longitude))
+    }
+
+    @Test
     fun `rejeita grau fracionado seguido de minutos`() {
         assertNull(CoordinateUtils.parseSexagesimal("22.5 30 S", Axis.Latitude))
     }
@@ -116,5 +131,23 @@ class CoordinateUtilsTest {
         val volta = CoordinateUtils.fromUtm(utm.zone, utm.hemisphere, utm.easting, utm.northing)
         close(-22.970, volta?.latitude, 1e-6)
         close(-43.226, volta?.longitude, 1e-6)
+    }
+
+    @Test
+    fun `faixa de latitude UTM nao confunde sul com a faixa S`() {
+        // Rio de Janeiro: zona 23, faixa K. "23S" seria a faixa de 32 a 40 N.
+        assertEquals("K", CoordinateUtils.utmBand(-22.9))
+        assertEquals("S", CoordinateUtils.utmBand(35.0))
+        assertEquals("C", CoordinateUtils.utmBand(-80.0))
+        assertEquals("X", CoordinateUtils.utmBand(84.0))
+        assertEquals("", CoordinateUtils.utmBand(85.0))
+    }
+
+    @Test
+    fun `zona UTM respeita Noruega, Svalbard e a longitude 180`() {
+        assertEquals(60, CoordinateUtils.utmZone(10.0, 180.0))
+        assertEquals(32, CoordinateUtils.utmZone(60.0, 5.0))
+        assertEquals(33, CoordinateUtils.utmZone(78.0, 15.0))
+        assertEquals(23, CoordinateUtils.utmZone(-22.9, -43.2))
     }
 }

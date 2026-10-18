@@ -1,6 +1,7 @@
 package com.oikos.fieldbook.data
 
 import com.oikos.fieldbook.dwc.DarwinCoreCatalog
+import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 
 class OikosRepository(private val db: OikosDatabase) {
@@ -90,7 +91,8 @@ class OikosRepository(private val db: OikosDatabase) {
 
     suspend fun updateField(field: FieldConfigEntity) = db.fieldConfigDao().update(field)
     suspend fun getFields(projectId: Long): List<FieldConfigEntity> = db.fieldConfigDao().getForProject(projectId)
-    suspend fun replaceFieldConfig(projectId: Long, fields: List<FieldConfigEntity>) {
+    /** Troca a configuracao de uma vez: uma falha no meio nao deixa o projeto sem campos. */
+    suspend fun replaceFieldConfig(projectId: Long, fields: List<FieldConfigEntity>) = db.withTransaction {
         db.fieldConfigDao().deleteForProject(projectId)
         db.fieldConfigDao().insertAll(fields.map { it.copy(id = 0, projectId = projectId) })
     }
@@ -123,4 +125,53 @@ class OikosRepository(private val db: OikosDatabase) {
     suspend fun createTrack(track: GpsTrackEntity): Long = db.gpsTrackDao().insertTrack(track)
     suspend fun updateTrack(track: GpsTrackEntity) = db.gpsTrackDao().updateTrack(track)
     suspend fun addTrackPoint(point: GpsTrackPointEntity): Long = db.gpsTrackDao().insertPoint(point)
+
+    /**
+     * Ponto de trilha gravado de uma vez: confere que a trilha segue ativa, le o
+     * ponto anterior, decide, grava e soma a distancia na mesma transacao. Antes
+     * cada posicao rodava em paralelo, lia o mesmo "anterior" e sobrescrevia a
+     * distancia das outras. Devolve a contagem de pontos, ou null se o ponto
+     * foi recusado ou a trilha ja estava encerrada.
+     */
+    suspend fun recordTrackPoint(
+        trackId: Long,
+        latitude: Double,
+        longitude: Double,
+        altitude: Double?,
+        accuracy: Double?,
+        timestamp: Long,
+        speed: Double?
+    ): RecordedPoint? = db.withTransaction {
+        val dao = db.gpsTrackDao()
+        val track = dao.getTrack(trackId)
+        if (track == null || !track.active) return@withTransaction null
+        val previous = dao.getLastPoint(trackId)
+        val decision = com.oikos.fieldbook.services.TrackPointRules.decide(previous, latitude, longitude, accuracy, timestamp)
+        if (!decision.accepted) return@withTransaction null
+        dao.insertPoint(
+            GpsTrackPointEntity(
+                trackId = trackId,
+                latitude = latitude,
+                longitude = longitude,
+                altitude = altitude,
+                accuracy = accuracy,
+                timestamp = timestamp,
+                speed = speed
+            )
+        )
+        dao.addProgress(trackId, decision.distanceFromPrevious, System.currentTimeMillis())
+        RecordedPoint(track.pointsCount + 1, track.totalDistance + decision.distanceFromPrevious)
+    }
+
+    /** Encerra no horario do ultimo ponto (ou no informado), sem regravar a trilha inteira. */
+    suspend fun closeTrack(trackId: Long, endTime: Long? = null) {
+        val dao = db.gpsTrackDao()
+        val end = endTime ?: dao.lastPointTime(trackId) ?: dao.getTrack(trackId)?.startTime ?: System.currentTimeMillis()
+        dao.close(trackId, end)
+    }
+
+    suspend fun lastTrackPointTime(trackId: Long): Long? = db.gpsTrackDao().lastPointTime(trackId)
 }
+
+/** Resultado de um ponto de trilha aceito. */
+data class RecordedPoint(val pointsCount: Int, val totalDistance: Double)

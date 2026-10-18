@@ -1,5 +1,6 @@
 package com.oikos.fieldbook.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -205,7 +206,32 @@ data class MediaEntity(
     val mediaSubject: String = "",
     val bodyPartOrPlantPart: String = "",
     val behaviorContext: String = "",
-    val notes: String = ""
+    val notes: String = "",
+    // Metadados de aquisicao (v6). Gannon et al. (2022) recomendam que
+    // parametros de gravacao, equipamento e condicoes ambientais acompanhem
+    // cada gravacao; sem eles o audio tem uso cientifico limitado.
+    /** Duracao do audio em milissegundos. */
+    val durationMillis: Long? = null,
+    val sampleRateHz: Int? = null,
+    val bitsPerSample: Int? = null,
+    val channels: Int? = null,
+    /** Fonte de audio do Android usada (UNPROCESSED, VOICE_RECOGNITION, MIC). */
+    val audioSource: String = "",
+    /** Fabricante e modelo do aparelho (ou camera, lido do EXIF). */
+    val captureDevice: String = "",
+    /** Microfone ou gravador externo, anotado pelo pesquisador. */
+    val microphone: String = "",
+    val airTemperature: Double? = null,
+    val relativeHumidity: Double? = null,
+    /** Distancia estimada ate a fonte sonora, em metros. */
+    val distanceToSourceMeters: Double? = null,
+    /**
+     * Falso quando a data e a hora da captura nao sao conhecidas: arquivo
+     * importado sem data gravada nele. createdAt guarda entao o momento da
+     * importacao, e a exportacao deixa a data de captura em branco (v7).
+     */
+    @ColumnInfo(defaultValue = "1")
+    val captureTimeKnown: Boolean = true
 )
 
 @Entity(

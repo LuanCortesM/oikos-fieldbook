@@ -11,6 +11,7 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import com.oikos.fieldbook.util.CoordinateUtils
+import com.oikos.fieldbook.geo.Geoid
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -100,7 +101,9 @@ class LocationService(private val context: Context) {
     private fun android.location.Location.toCapturedLocation(): CapturedLocation = CapturedLocation(
         latitude = CoordinateUtils.roundCoordinate(latitude),
         longitude = CoordinateUtils.roundCoordinate(longitude),
-        altitude = if (hasAltitude()) CoordinateUtils.roundAltitude(altitude) else null,
+        // Altura do GPS e sobre o elipsoide; vira altitude sobre o nivel do mar
+        // pelo geoide EGM2008. Sem o modelo, melhor sem altitude do que errada.
+        altitude = if (hasAltitude()) Geoid.get(context)?.let { CoordinateUtils.roundAltitude(it.aboveSeaLevel(altitude, latitude, longitude)) } else null,
         accuracyMeters = if (hasAccuracy()) CoordinateUtils.roundUncertainty(accuracy.toDouble()) else null,
         capturedAt = time.takeIf { it > 0 } ?: System.currentTimeMillis()
     )

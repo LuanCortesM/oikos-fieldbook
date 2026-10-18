@@ -1,4 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 11 ou anterior. Mesmo criterio da nuvem em data_extraction_rules.xml:
+  o limite de 25 MB por app faria o Android desistir do backup inteiro se fotos,
+  audios, mapas e listas de especies entrassem. Esses ficam com o backup do app.
+-->
 <full-backup-content>
-    <include domain="database" path="." />
-    <include domain="file" path="." />
+    <include domain="database" path="oikos_fieldbook.db" />
+    <include domain="database" path="oikos_fieldbook.db-wal" />
+    <include domain="sharedpref" path="." />
 </full-backup-content>
