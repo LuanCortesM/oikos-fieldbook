@@ -1,5 +1,6 @@
 package com.oikos.fieldbook.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Embedded
 import androidx.room.Entity
@@ -46,6 +47,9 @@ data class TaxonNameEntity(
     val family: String,
     val genus: String,
     val kingdom: String,
+    /** Classe e ordem (v2): dao o icone do registro no mapa (anuro, ave, serpente...). */
+    @ColumnInfo(defaultValue = "") val taxonClass: String = "",
+    @ColumnInfo(defaultValue = "") val taxonOrder: String = "",
     /** Nome normalizado (minusculas, sem acento) para busca por prefixo no indice. */
     val searchKey: String
 )

@@ -70,7 +70,7 @@ object ChecklistSources {
             key = "flora_brasil",
             title = "Flora e Funga do Brasil",
             scope = "Brasil · plantas, algas e fungos",
-            description = "Lista oficial do JBRJ. CC BY 4.0.",
+            description = "Lista oficial do JBRJ.",
             archiveUrl = "https://ipt.jbrj.gov.br/jbrj/archive.do?r=lista_especies_flora_brasil",
             emlUrl = "https://ipt.jbrj.gov.br/jbrj/eml.do?r=lista_especies_flora_brasil",
             mirrorArchiveUrl = "https://api.checklistbank.org/dataset/2031/archive.zip",
@@ -82,7 +82,7 @@ object ChecklistSources {
             key = "fauna_brasil",
             title = "Catálogo Taxonômico da Fauna do Brasil",
             scope = "Brasil · animais",
-            description = "Catálogo oficial da fauna brasileira. CC BY 4.0.",
+            description = "Catálogo oficial da fauna brasileira.",
             archiveUrl = "https://ipt.jbrj.gov.br/jbrj/archive.do?r=catalogo_taxonomico_da_fauna_do_brasil",
             emlUrl = "https://ipt.jbrj.gov.br/jbrj/eml.do?r=catalogo_taxonomico_da_fauna_do_brasil",
             mirrorArchiveUrl = "https://api.checklistbank.org/dataset/281817/archive.zip",
@@ -229,6 +229,8 @@ class ChecklistService(private val context: Context, private val database: Check
                             family = record.family,
                             genus = record.genus,
                             kingdom = record.kingdom,
+                            taxonClass = record.taxonClass,
+                            taxonOrder = record.taxonOrder,
                             searchKey = ChecklistParser.searchKey(record.canonicalName)
                         )
                         count++
@@ -315,6 +317,66 @@ class ChecklistService(private val context: Context, private val database: Check
         if (matches.any { it.status == TaxonStatus.ACCEPTED.code }) return NameCheck(found = true)
         val synonym = matches.firstOrNull { it.status == TaxonStatus.SYNONYM.code }
         return NameCheck(found = true, synonymOf = synonym?.acceptedName?.ifBlank { "?" })
+    }
+
+    /**
+     * Icone do registro no mapa (regras em [MapIcons]). So consulta as listas:
+     * nao muda nada no registro.
+     */
+    suspend fun mapIconGroup(occurrence: com.oikos.fieldbook.data.OccurrenceEntity): MapIconGroup {
+        if (occurrence.occurrenceType == "Armadilha fotográfica") return MapIconGroup.CAMERA_TRAP
+        val fields = runCatching { org.json.JSONObject(occurrence.dynamicFieldsJson) }.getOrNull()
+        fun field(key: String): String = fields?.optString(key).orEmpty().trim()
+        val texts = buildList {
+            add(occurrence.occurrenceRemarks)
+            add(occurrence.fieldNotes)
+            add(occurrence.behavior)
+            MapIcons.ASSOCIATION_KEYS.forEach { add(field(it)) }
+        }.filter { it.isNotBlank() }
+        val taxon = lookupForIcon(occurrence.scientificName, field("scientificNameAuthorship"), field("genus"))
+        val info = TaxonGroupInfo(
+            kingdom = taxon?.kingdom?.ifBlank { null } ?: field("kingdom"),
+            taxonClass = taxon?.taxonClass?.ifBlank { null } ?: field("class"),
+            taxonOrder = taxon?.taxonOrder?.ifBlank { null } ?: field("order"),
+            family = taxon?.family?.ifBlank { null } ?: field("family")
+        )
+        return when {
+            occurrence.formType == "Fungos" || info.kingdom.equals("Fungi", ignoreCase = true) -> MapIconGroup.FUNGI
+            occurrence.formType == "Botanica" || info.kingdom.equals("Plantae", ignoreCase = true) ->
+                if (info.family.equals("Bromeliaceae", ignoreCase = true) && anuranAssociated(texts)) MapIconGroup.FROG_BROMELIAD
+                else MapIconGroup.FLORA
+            else -> {
+                val group = MapIcons.animalGroup(info) ?: MapIcons.groupFromAnimalGroupText(field("animalGroup")) ?: MapIconGroup.OTHER
+                if (group == MapIconGroup.FROG && bromeliadAssociated(texts)) MapIconGroup.FROG_BROMELIAD else group
+            }
+        }
+    }
+
+    /** Nome exato e, se nao houver, o genero; prefere a linha que traz classe e ordem. */
+    private suspend fun lookupForIcon(fullName: String, authorship: String, genus: String): TaxonNameEntity? {
+        if (fullName.isBlank() || dao.countChecklists() == 0) return null
+        fun best(rows: List<TaxonNameEntity>) = rows.firstOrNull { it.taxonClass.isNotBlank() || it.taxonOrder.isNotBlank() } ?: rows.firstOrNull()
+        val canonical = ChecklistParser.canonical(fullName, authorship)
+        best(dao.exactMatches(ChecklistParser.searchKey(canonical)))?.let { return it }
+        val genusName = genus.ifBlank { canonical.substringBefore(' ') }
+        if (genusName.isBlank()) return null
+        return best(dao.exactMatches(ChecklistParser.searchKey(genusName)))
+    }
+
+    /** Registro de anuro que cita bromelia, por palavra ou pelo nome de uma Bromeliaceae. */
+    private suspend fun bromeliadAssociated(texts: List<String>): Boolean {
+        if (MapIcons.mentionsBromeliad(texts)) return true
+        return MapIcons.nameCandidates(texts).any { name ->
+            lookupForIcon(name, "", "")?.family.equals("Bromeliaceae", ignoreCase = true)
+        }
+    }
+
+    /** Registro de bromelia que cita anuro, por palavra ou pelo nome de um Anura. */
+    private suspend fun anuranAssociated(texts: List<String>): Boolean {
+        if (MapIcons.mentionsAnuran(texts)) return true
+        return MapIcons.nameCandidates(texts).any { name ->
+            lookupForIcon(name, "", "")?.taxonOrder.equals("Anura", ignoreCase = true)
+        }
     }
 
     private fun open(url: String): HttpURLConnection {

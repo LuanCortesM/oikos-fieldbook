@@ -24,7 +24,10 @@ data class TaxonRecord(
     val acceptedName: String,
     val family: String,
     val genus: String,
-    val kingdom: String
+    val kingdom: String,
+    /** Classe e ordem (dwc:class, dwc:order), quando a lista traz. */
+    val taxonClass: String = "",
+    val taxonOrder: String = ""
 )
 
 enum class TaxonStatus(val code: String) {
@@ -162,7 +165,9 @@ object ChecklistParser {
             acceptedName = cell("acceptedNameUsage"),
             family = cell("family"),
             genus = cell("genus"),
-            kingdom = cell("kingdom")
+            kingdom = cell("kingdom"),
+            taxonClass = cell("class"),
+            taxonOrder = cell("order")
         )
     }
 

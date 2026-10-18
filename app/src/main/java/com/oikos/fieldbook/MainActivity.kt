@@ -169,6 +169,7 @@ import com.oikos.fieldbook.services.FixQuality
 import com.oikos.fieldbook.services.GpsAveraging
 import com.oikos.fieldbook.services.GpsReading
 import com.oikos.fieldbook.backup.BackupManifest
+import com.oikos.fieldbook.checklist.MapIconGroup
 import com.oikos.fieldbook.checklist.ChecklistSource
 import com.oikos.fieldbook.checklist.ChecklistSources
 import com.oikos.fieldbook.checklist.RemoteVersion
@@ -1579,10 +1580,15 @@ private fun SessionDetailScreen(
                 }
             }
             item {
+                // Icone de cada registro no mapa, pela lista instalada (so leitura).
+                val mapIcons by androidx.compose.runtime.produceState(emptyMap<Long, MapIconGroup>(), occurrences) {
+                    value = viewModel.mapIconGroups(occurrences)
+                }
                 TrackPanel(
                     track = displayTrack,
                     points = trackPoints,
                     occurrences = occurrences,
+                    iconGroups = mapIcons,
                     currentLocation = currentLocation,
                     isActive = activeTrack != null,
                     onLocate = {
@@ -1661,8 +1667,8 @@ private fun SessionDetailScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
                             StatusBadge(if (complete) "Completo" else "Incompleto", complete)
                             StatusBadge(if (hasGps) "GPS ok" else "Sem GPS", hasGps)
-                            StatusBadge("$photos fotos", photos > 0)
-                            StatusBadge("$audios áudios", audios > 0)
+                            StatusBadge("$photos ${ui(if (photos == 1) "foto" else "fotos")}", photos > 0)
+                            StatusBadge("$audios ${ui(if (audios == 1) "áudio" else "áudios")}", audios > 0)
                         }
                         PhotoThumbnailStrip(occurrenceMedia.filter { it.mediaType == "photo" })
                     }
@@ -1685,7 +1691,8 @@ private fun TrackPanel(
     onStop: () -> Unit,
     onImport: () -> Unit,
     onExport: () -> Unit,
-    profile: TrackProfile = TrackProfile.PRECISE
+    profile: TrackProfile = TrackProfile.PRECISE,
+    iconGroups: Map<Long, MapIconGroup> = emptyMap()
 ) {
     var showLargeMap by remember { mutableStateOf(false) }
     var recenterToken by remember { mutableStateOf(0) }
@@ -1696,6 +1703,7 @@ private fun TrackPanel(
         TrackMapDialog(
             points = points,
             occurrences = occurrences,
+            iconGroups = iconGroups,
             currentLocation = currentLocation,
             bearing = bearing,
             onLocate = {
@@ -1744,6 +1752,7 @@ private fun TrackPanel(
             TrackMapPreview(
                 points = points,
                 occurrences = occurrences,
+                iconGroups = iconGroups,
                 currentLocation = currentLocation,
                 bearing = bearing,
                 recenterToken = recenterToken,
@@ -1781,7 +1790,8 @@ private fun TrackPanel(
             val occurrencePoints = occurrences.count { it.latitude != null && it.longitude != null }
             val lastPoint = points.lastOrNull()
             Text(
-                "${points.size} pontos da trilha - $occurrencePoints ocorrências com GPS - ${humanDistance(distance)}.",
+                "${points.size} ${ui(if (points.size == 1) "ponto da trilha" else "pontos da trilha")} - " +
+                    "$occurrencePoints ${ui(if (occurrencePoints == 1) "ocorrência com GPS" else "ocorrências com GPS")} - ${humanDistance(distance)}.",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1805,13 +1815,16 @@ private fun TrackMapPreview(
     currentLocation: CapturedLocation?,
     bearing: () -> Float,
     recenterToken: Int,
+    iconGroups: Map<Long, MapIconGroup> = emptyMap(),
     modifier: Modifier = Modifier
 ) {
     val border = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
     val context = LocalContext.current
     val offlineMap = LocalOfflineMap.current
     val occurrencePoints = occurrences.filter { it.latitude != null && it.longitude != null }
-    val userArrow = remember(context) { oikosArrowMarkerDrawable(context) }
+    val userArrow = remember(context) { oikosUserMarkerDrawable(context) }
+    // Um alfinete por grupo (fauna, flora, fungos), desenhado uma vez so.
+    val recordPins = remember(context) { mutableMapOf<MapIconGroup, android.graphics.drawable.Drawable>() }
     var mapViewRef by remember { mutableStateOf<MapView?>(null) }
     var mapOrientation by remember { mutableStateOf(0f) }
     // Camadas guardadas entre recomposicoes: antes, a cada giro da bussola, a
@@ -1823,7 +1836,7 @@ private fun TrackMapPreview(
             delay(120)
         }
     }
-    // A seta do usuario gira sem recompor a tela: so a rotacao do marcador muda.
+    // O ponteiro do usuario gira sem recompor a tela: so a rotacao do marcador muda.
     LaunchedEffect(mapViewRef) {
         val view = mapViewRef ?: return@LaunchedEffect
         androidx.compose.runtime.snapshotFlow { bearing() }.collect { value ->
@@ -1887,13 +1900,16 @@ private fun TrackMapPreview(
                     val lon = it.longitude
                     if (lat != null && lon != null) GeoPoint(lat, lon) to it else null
                 }
-                val occurrencesKey = occurrenceGeo.map { (point, occurrence) -> "${occurrence.id}:${point.latitude}:${point.longitude}:${occurrence.scientificName}" }
+                val occurrencesKey = occurrenceGeo.map { (point, occurrence) -> "${occurrence.id}:${point.latitude}:${point.longitude}:${occurrence.scientificName}:${iconGroups[occurrence.id] ?: provisionalMapGroup(occurrence.formType)}" }
                 if (layers.occurrencesKey != occurrencesKey) {
                     layers.occurrencesKey = occurrencesKey
                     layers.occurrences = occurrenceGeo.map { (point, occurrence) ->
                         Marker(mapView).apply {
                             position = point
                             title = occurrence.scientificName.ifBlank { occurrence.occurrenceId }
+                            icon = (iconGroups[occurrence.id] ?: provisionalMapGroup(occurrence.formType)).let { group ->
+                                recordPins.getOrPut(group) { oikosPinMarkerDrawable(context, group) }
+                            }
                             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                         }
                     }
@@ -1940,10 +1956,19 @@ private fun TrackMapPreview(
                 }
                 // Os pontos chegam do banco depois da primeira montagem do mapa:
                 // antes ele ficava no ponto padrao, com a trilha fora da tela.
-                if (mapView.tag != recenterToken || centerLevel > layers.centerLevel) {
+                // Ao abrir (e quando chegam dados novos) o mapa enquadra a trilha e
+                // os registros inteiros; antes abria em zoom 17 no ultimo ponto e
+                // cortava o resto. O botao de centralizar continua indo ao ponto.
+                val askedRecenter = mapView.tag != null && mapView.tag != recenterToken
+                if (askedRecenter) {
                     mapView.mapOrientation = 0f
                     mapView.controller.setZoom(17.0)
                     mapView.controller.setCenter(center)
+                    mapView.tag = recenterToken
+                    layers.centerLevel = centerLevel
+                } else if (mapView.tag == null || centerLevel > layers.centerLevel) {
+                    mapView.mapOrientation = 0f
+                    mapView.frameData(trackGeo + occurrenceGeo.map { it.first }, center)
                     mapView.tag = recenterToken
                     layers.centerLevel = centerLevel
                 }
@@ -2014,7 +2039,8 @@ private fun TrackMapDialog(
     currentLocation: CapturedLocation?,
     bearing: () -> Float,
     onLocate: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    iconGroups: Map<Long, MapIconGroup> = emptyMap()
 ) {
     var recenterToken by remember { mutableStateOf(1) }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -2030,13 +2056,14 @@ private fun TrackMapDialog(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(ui("Mapa da expedição"), style = MaterialTheme.typography.titleMedium)
-                        Text(ui("Seta laranja: direção do usuário. A bússola N mapa aponta o norte do mapa; gire com dois dedos para orientar a visualização."), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(ui("O ponteiro laranja mostra onde você está e para onde aponta. Gire o mapa com dois dedos; o N indica o norte."), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     TextButton(onClick = onDismiss) { Text(ui("Fechar")) }
                 }
                 TrackMapPreview(
                     points = points,
                     occurrences = occurrences,
+                    iconGroups = iconGroups,
                     currentLocation = currentLocation,
                     bearing = bearing,
                     recenterToken = recenterToken,
@@ -2141,31 +2168,124 @@ private fun rememberCompassBearing(): androidx.compose.runtime.State<Float> {
     return bearingState
 }
 
-private fun oikosArrowMarkerDrawable(context: Context): BitmapDrawable {
-    val size = 96
+private val MAP_ORANGE = android.graphics.Color.rgb(255, 106, 0)
+private val MAP_DARK = android.graphics.Color.rgb(23, 24, 28)
+private val MAP_CREAM = android.graphics.Color.rgb(255, 230, 207)
+
+private fun mapFill(color: Int) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    this.color = color
+    style = Paint.Style.FILL
+}
+
+/**
+ * Posicao do usuario: disco escuro com anel laranja, centro creme e ponteiro
+ * de rumo no alto. Gira com a bussola em torno do centro (ancora no meio).
+ * Desenho em unidades de 48 x 48, escalado para 40 dp.
+ */
+private fun oikosUserMarkerDrawable(context: Context): BitmapDrawable {
+    val size = (40 * context.resources.displayMetrics.density).toInt()
     val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(bitmap)
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.rgb(255, 106, 0)
-        style = Paint.Style.FILL
-    }
-    val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.argb(95, 0, 0, 0)
-        style = Paint.Style.FILL
-    }
-    val arrow = Path().apply {
-        moveTo(size / 2f, 8f)
-        lineTo(size * 0.78f, size * 0.82f)
-        lineTo(size / 2f, size * 0.64f)
-        lineTo(size * 0.22f, size * 0.82f)
+    canvas.scale(size / 48f, size / 48f)
+    canvas.drawPath(Path().apply {
+        moveTo(24f, 2f)
+        lineTo(29f, 11f)
+        lineTo(19f, 11f)
+        close()
+    }, mapFill(MAP_ORANGE))
+    canvas.drawCircle(24f, 24f, 11f, mapFill(MAP_DARK))
+    canvas.drawCircle(24f, 24f, 11f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = MAP_ORANGE
+        style = Paint.Style.STROKE
+        strokeWidth = 2.5f
+    })
+    canvas.drawCircle(24f, 24f, 4f, mapFill(MAP_CREAM))
+    return BitmapDrawable(context.resources, bitmap)
+}
+
+/**
+ * Alfinete dos registros: gota escura com contorno branco, ponta laranja e o
+ * icone do grupo (anuro, ave, serpente, camera trap...; ver MapIcons).
+ * Os icones sao PNG gerados por tools/icones/GerarIcones.java. Desenho em
+ * unidades de 40 x 52, escalado para 30 dp de largura.
+ */
+private fun oikosPinMarkerDrawable(context: Context, group: MapIconGroup): BitmapDrawable {
+    val scale = 30 * context.resources.displayMetrics.density / 40f
+    val bitmap = Bitmap.createBitmap((40 * scale).toInt(), (52 * scale).toInt(), Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bitmap)
+    canvas.scale(scale, scale)
+    val drop = Path().apply {
+        moveTo(20f, 50f)
+        cubicTo(17f, 44f, 5f, 32f, 5f, 20f)
+        arcTo(android.graphics.RectF(5f, 5f, 35f, 35f), 180f, 180f, false)
+        cubicTo(35f, 32f, 23f, 44f, 20f, 50f)
         close()
     }
+    canvas.drawPath(drop, mapFill(MAP_DARK))
     canvas.save()
-    canvas.translate(3f, 5f)
-    canvas.drawPath(arrow, shadowPaint)
+    canvas.clipPath(drop)
+    canvas.drawRect(0f, 35f, 40f, 52f, mapFill(MAP_ORANGE))
     canvas.restore()
-    canvas.drawPath(arrow, paint)
+    canvas.drawPath(drop, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
+        style = Paint.Style.STROKE
+        strokeWidth = 1.5f
+        strokeJoin = Paint.Join.ROUND
+    })
+    val iconRes = when (group) {
+        MapIconGroup.FROG -> R.drawable.map_icon_frog
+        MapIconGroup.FROG_BROMELIAD -> R.drawable.map_icon_frog_bromeliad
+        MapIconGroup.REPTILE -> R.drawable.map_icon_reptile
+        MapIconGroup.SNAKE -> R.drawable.map_icon_snake
+        MapIconGroup.BIRD -> R.drawable.map_icon_bird
+        MapIconGroup.MAMMAL -> R.drawable.map_icon_mammal
+        MapIconGroup.INSECT -> R.drawable.map_icon_insect
+        MapIconGroup.ARACHNID -> R.drawable.map_icon_arachnid
+        MapIconGroup.FISH -> R.drawable.map_icon_fish
+        MapIconGroup.CAMERA_TRAP -> R.drawable.map_icon_camera_trap
+        MapIconGroup.FLORA -> R.drawable.map_icon_flora
+        MapIconGroup.FUNGI -> R.drawable.map_icon_fungi
+        MapIconGroup.OTHER -> null
+    }
+    val icon = iconRes?.let { BitmapFactory.decodeResource(context.resources, it) }
+    if (icon != null) {
+        canvas.drawBitmap(
+            icon,
+            null,
+            android.graphics.RectF(8.5f, 8.5f, 31.5f, 31.5f),
+            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        )
+        icon.recycle()
+    } else {
+        // Sem grupo conhecido: so um ponto, sem sugerir fauna ou flora.
+        canvas.drawCircle(20f, 20f, 4.5f, mapFill(MAP_CREAM))
+    }
     return BitmapDrawable(context.resources, bitmap)
+}
+
+/** Grupo provisorio enquanto a consulta as listas nao termina. */
+private fun provisionalMapGroup(formType: String): MapIconGroup = when (formType) {
+    "Botanica" -> MapIconGroup.FLORA
+    "Fungos" -> MapIconGroup.FUNGI
+    else -> MapIconGroup.OTHER
+}
+
+/**
+ * Enquadra a trilha e os registros inteiros, com folga para o alfinete, a
+ * bussola e o credito. Um ponto so (ou nenhum) fica no centro, em zoom 17.
+ */
+private fun MapView.frameData(points: List<GeoPoint>, fallback: GeoPoint) {
+    val distinct = points.distinctBy { it.latitude to it.longitude }
+    if (distinct.size < 2) {
+        controller.setZoom(17.0)
+        controller.setCenter(distinct.firstOrNull() ?: fallback)
+        return
+    }
+    val box = org.osmdroid.util.BoundingBox.fromGeoPointsSafe(distinct)
+    val border = (48 * resources.displayMetrics.density).toInt()
+    // Pontos muito proximos pediriam zoom alem do que os tiles tem: no maximo 18.
+    val apply = { zoomToBoundingBox(box, false, border, 18.0, null) }
+    if (isLayoutOccurred) apply() else addOnFirstLayoutListener { _, _, _, _, _ -> apply() }
 }
 
 private fun hasPermission(context: Context, permission: String): Boolean =
@@ -3498,7 +3618,7 @@ private fun mediaCaptureLabel(media: MediaEntity): String =
 private fun mediaTechnicalSummary(media: MediaEntity): String {
     if (media.mediaType != "audio") return media.captureDevice
     val duration = media.durationMillis?.let { millis ->
-        val seconds = millis / 1000
+        val seconds = (millis + 500) / 1000
         if (seconds >= 60) String.format(Locale.US, "%d min %02d s", seconds / 60, seconds % 60) else "$seconds s"
     }
     return listOfNotNull(
@@ -4403,9 +4523,12 @@ private fun ScientificNameField(
                         ) {
                             Text(
                                 androidx.compose.ui.text.buildAnnotatedString {
-                                    pushStyle(androidx.compose.ui.text.SpanStyle(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic))
+                                    // Italico so de genero para baixo, como pedem os codigos de
+                                    // nomenclatura: familia e tribo ("Aplastini") vao em redondo.
+                                    val italic = taxon.rank.isBlank() || taxon.rank in ITALIC_RANKS
+                                    if (italic) pushStyle(androidx.compose.ui.text.SpanStyle(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic))
                                     append(taxon.canonicalName)
-                                    pop()
+                                    if (italic) pop()
                                     if (taxon.authorship.isNotBlank()) append(" ${taxon.authorship}")
                                 },
                                 style = MaterialTheme.typography.bodyLarge
@@ -4413,7 +4536,7 @@ private fun ScientificNameField(
                             val details = listOfNotNull(
                                 suggestion.matchedVernacular?.let { "\"$it\"" },
                                 taxon.family.takeIf { it.isNotBlank() },
-                                dwcValueLabel(taxon.rank).takeIf { it.isNotBlank() },
+                                dwcValueLabel(taxon.rank).takeIf { it.isNotBlank() }?.let { ui(it) },
                                 suggestion.checklistTitle
                             ).joinToString(" · ")
                             Text(details, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -5133,6 +5256,33 @@ private val englishText = mapOf(
     "Expedições" to "Expeditions",
     "expedições" to "expeditions",
     "expedição" to "expedition",
+    "Reino" to "Kingdom",
+    "Filo" to "Phylum",
+    "Subfilo" to "Subphylum",
+    "Classe" to "Class",
+    "Subclasse" to "Subclass",
+    "Ordem" to "Order",
+    "Subordem" to "Suborder",
+    "Infraordem" to "Infraorder",
+    "Superfamília" to "Superfamily",
+    "Família" to "Family",
+    "Subfamília" to "Subfamily",
+    "Tribo" to "Tribe",
+    "Subtribo" to "Subtribe",
+    "Gênero" to "Genus",
+    "Subgênero" to "Subgenus",
+    "Espécie" to "Species",
+    "Subespécie" to "Subspecies",
+    "Variedade" to "Variety",
+    "Forma" to "Form",
+    "foto" to "photo",
+    "fotos" to "photos",
+    "áudio" to "recording",
+    "áudios" to "recordings",
+    "ponto da trilha" to "track point",
+    "pontos da trilha" to "track points",
+    "ocorrência com GPS" to "occurrence with GPS",
+    "ocorrências com GPS" to "occurrences with GPS",
     "Sem expedições." to "No expeditions.",
     "Crie uma expedição para agrupar as ocorrências de campo." to "Create an expedition to group field occurrences.",
     "Apagar expedição" to "Delete expedition",
@@ -5203,7 +5353,7 @@ private val englishText = mapOf(
     "N verdadeiro" to "True N",
     "bússola do celular" to "phone compass",
     "Seta laranja: direção do usuário. N do mapa: topo do mapa. N verdadeiro: norte pela bússola do celular." to "Orange arrow: user heading. Map N: top of the map. True N: north from the phone compass.",
-    "Seta laranja: direção do usuário. A bússola N mapa aponta o norte do mapa; gire com dois dedos para orientar a visualização." to "Orange arrow: user heading. The Map N compass points to map north; rotate with two fingers to orient the view.",
+    "O ponteiro laranja mostra onde você está e para onde aponta. Gire o mapa com dois dedos; o N indica o norte." to "The orange pointer shows where you are and which way you face. Rotate the map with two fingers; the N marks north.",
     "Mapa OpenStreetMap" to "OpenStreetMap map",
     "A trilha laranja aparece quando houver pontos de GPS." to "The orange track appears when GPS points are available.",
     "Grupo do registro" to "Record group",
@@ -5483,10 +5633,10 @@ private val englishText = mapOf(
     "Qualquer lista publicada como Darwin Core Archive com núcleo Taxon, como as de outros países no GBIF, no ChecklistBank ou em um IPT. Baixe o arquivo .zip e importe aqui." to "Any list published as a Darwin Core Archive with a Taxon core, such as other countries' lists on GBIF, ChecklistBank or an IPT. Download the .zip file and import it here.",
     "Importar arquivo" to "Import file",
     "Brasil · plantas, algas e fungos" to "Brazil · plants, algae and fungi",
-    "Lista oficial do JBRJ. CC BY 4.0." to "Official list from JBRJ. CC BY 4.0.",
+    "Lista oficial do JBRJ." to "Official list from JBRJ.",
     "Baixada da cópia guardada no ChecklistBank, porque o IPT do JBRJ recusou a conexão. A cópia pode estar algumas semanas atrás do IPT." to "Downloaded from the copy kept by ChecklistBank, because the JBRJ IPT refused the connection. The copy may be a few weeks behind the IPT.",
     "Brasil · animais" to "Brazil · animals",
-    "Catálogo oficial da fauna brasileira. CC BY 4.0." to "Official catalogue of Brazilian fauna. CC BY 4.0.",
+    "Catálogo oficial da fauna brasileira." to "Official catalogue of Brazilian fauna.",
     "Não instalada" to "Not installed",
     "cerca de" to "about",
     "para baixar" to "to download",
@@ -6153,6 +6303,9 @@ private fun DwcVocabularyInput(
 }
 
 /** Rotulo em portugues para um valor de vocabulario controlado. */
+/** Postos que vao em italico: genero e abaixo (ICZN e ICN). */
+private val ITALIC_RANKS = setOf("genus", "subgenus", "species", "subspecies", "variety", "form")
+
 private fun dwcValueLabel(value: String): String = when (value) {
     "HumanObservation" -> "Observação"
     "MachineObservation" -> "Registro automático"
@@ -6178,10 +6331,19 @@ private fun dwcValueLabel(value: String): String = when (value) {
     "seed" -> "Semente"
     "kingdom" -> "Reino"
     "phylum" -> "Filo"
+    "subphylum" -> "Subfilo"
     "class" -> "Classe"
+    "subclass" -> "Subclasse"
     "order" -> "Ordem"
+    "suborder" -> "Subordem"
+    "infraorder" -> "Infraordem"
     "family" -> "Família"
+    "superfamily" -> "Superfamília"
+    "subfamily" -> "Subfamília"
+    "tribe" -> "Tribo"
+    "subtribe" -> "Subtribo"
     "genus" -> "Gênero"
+    "subgenus" -> "Subgênero"
     "species" -> "Espécie"
     "subspecies" -> "Subespécie"
     "variety" -> "Variedade"

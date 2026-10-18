@@ -280,6 +280,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     suspend fun vernacularFor(taxon: TaxonNameEntity): String? = checklistService.vernacularFor(taxon)
 
+    /** Icone de cada registro no mapa (so leitura das listas). */
+    suspend fun mapIconGroups(occurrences: List<OccurrenceEntity>): Map<Long, com.oikos.fieldbook.checklist.MapIconGroup> =
+        occurrences.associate { it.id to (runCatching { checklistService.mapIconGroup(it) }.getOrNull() ?: com.oikos.fieldbook.checklist.MapIconGroup.OTHER) }
+
     suspend fun checkName(fullName: String, authorship: String): com.oikos.fieldbook.checklist.NameCheck? =
         runCatching { checklistService.check(fullName, authorship) }.getOrNull()
 
