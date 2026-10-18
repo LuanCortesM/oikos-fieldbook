@@ -257,7 +257,9 @@ class MainActivity : ComponentActivity() {
         applySystemBars(darkTheme = true)
         val languagePrefs = getSharedPreferences("oikos_app_settings", Context.MODE_PRIVATE)
         val deviceLanguage = currentDeviceUiLanguage()
-        Configuration.getInstance().userAgentValue = packageName
+        // A politica de tiles do OpenStreetMap pede um User-Agent proprio e
+        // estavel, com o nome do app (operations.osmfoundation.org/policies/tiles).
+        Configuration.getInstance().userAgentValue = "OikosFieldBook/${BuildConfig.VERSION_NAME} ($packageName)"
         setContent {
             // Tema e modo simples passam a persistir entre aberturas, junto do
             // idioma, que ja persistia. Antes voltavam ao padrao a cada inicio
@@ -1955,6 +1957,9 @@ private fun TrackMapPreview(
                 .align(Alignment.TopStart)
                 .padding(8.dp)
         )
+        // Credito exigido pela politica de tiles do OpenStreetMap: visivel no
+        // mapa e com link para a pagina de direitos autorais.
+        val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
         Surface(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -1963,16 +1968,26 @@ private fun TrackMapPreview(
             shape = MaterialTheme.shapes.small
         ) {
             Text(
-                offlineMap?.let { map -> map.attribution.ifBlank { map.name } } ?: "© OpenStreetMap",
+                offlineMap?.let { map -> map.attribution.ifBlank { map.name } } ?: "© OpenStreetMap contributors",
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                modifier = Modifier
+                    .then(
+                        if (offlineMap == null) {
+                            Modifier.clickable { runCatching { uriHandler.openUri(OSM_COPYRIGHT_URL) } }
+                        } else {
+                            Modifier
+                        }
+                    )
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
 }
+
+private const val OSM_COPYRIGHT_URL = "https://www.openstreetmap.org/copyright"
 
 /**
  * OpenStreetMap pela internet ou o MBTiles escolhido. No offline o zoom fica
@@ -3661,7 +3676,7 @@ private fun SettingsScreen(
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(ui("Listas de espécies"), style = MaterialTheme.typography.titleMedium)
                         Text(
-                            if (installedChecklists.isEmpty()) ui("Nenhuma instalada. Baixe a Flora e Funga do Brasil ou a Fauna do Brasil para ter autocompletar do nome científico em campo.")
+                            if (installedChecklists.isEmpty()) ui("Nenhuma instalada. Baixe uma para completar nomes científicos em campo.")
                             else ui("versão").let { word -> installedChecklists.joinToString("\n") { "${it.title} · $word ${it.version}" } },
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -3694,7 +3709,7 @@ private fun SettingsScreen(
                                 Text(if (isDark) ui("Escuro") else ui("Claro"), style = MaterialTheme.typography.titleMedium)
                             }
                         }
-                        Text(ui("Tema de alto contraste para campo, com alternância sempre visível."), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(ui("Alto contraste para uso ao sol."), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Switch(checked = darkTheme, onCheckedChange = onThemeChange)
                 }
@@ -3702,7 +3717,7 @@ private fun SettingsScreen(
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), elevation = CardDefaults.cardElevation(2.dp)) {
                 Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(ui("Idioma do aplicativo"), style = MaterialTheme.typography.titleMedium)
-                    Text(ui("Use automático para seguir o idioma do celular. Você também pode forçar português ou inglês manualmente."), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(ui("Automático segue o idioma do celular."), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     ChipRow(
                         "Idioma",
                         listOf("auto" to "Automático", "pt" to "Português", "en" to "English"),
@@ -3715,7 +3730,7 @@ private fun SettingsScreen(
                 Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(ui("Modo simples / coleta rápida"), style = MaterialTheme.typography.titleMedium)
-                        Text(ui("Menos campos visíveis por padrão; ideal para sol forte, pressa e uso prolongado."), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(ui("Mostra menos campos no formulário."), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Switch(checked = simpleMode, onCheckedChange = onSimpleModeChange)
                 }
@@ -3725,7 +3740,7 @@ private fun SettingsScreen(
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(ui("Sugerir endereço pelo Google"), style = MaterialTheme.typography.titleMedium)
                         Text(
-                            ui("No Brasil, município e estado já são sugeridos sem internet, pela malha do IBGE. Esta opção serve para coletas fora do Brasil e usa a internet: a coordenada capturada vai ao serviço de endereços do Google. Deixe desligada em locais de espécies sensíveis."),
+                            ui("Só para coletas fora do Brasil. Envia a coordenada ao Google."),
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -3743,7 +3758,7 @@ private fun SettingsScreen(
                     // dos blocos de mapa ja vistos, descrito aqui como e.
                     Text(ui("Mapa e uso offline"), style = MaterialTheme.typography.titleMedium)
                     Text(
-                        ui("A coleta, o GPS e a trilha funcionam sem internet. O mapa de fundo guarda os trechos já vistos: abra o mapa da área de trabalho enquanto houver internet e ele continua disponível em campo."),
+                        ui("O OpenStreetMap precisa de internet. Para campo sem sinal, importe um mapa offline (.mbtiles)."),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text("${ui("Cache do mapa")}: ${humanSize(mapCache)}")
@@ -3808,7 +3823,7 @@ private fun ChecklistsScreen(viewModel: AppViewModel, modifier: Modifier, onBack
             item {
                 HelpCard(
                     "Listas de espécies",
-                    "Baixe uma vez, com internet, e use em campo sem rede: o nome científico é sugerido enquanto você digita, a autoria e a família são preenchidas e sinônimos são trocados pelo nome aceito. As listas vêm direto da fonte oficial, e o app confere se há versão nova sempre que houver internet."
+                    "Baixe uma vez com internet e use em campo sem rede: o nome é sugerido enquanto você digita e sinônimos viram o nome aceito."
                 )
             }
             items(ChecklistSources.all, key = { it.key }) { source ->
@@ -4444,9 +4459,9 @@ private fun TrackProfileCard(viewModel: AppViewModel) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(ui("Trilha GPS e bateria"), style = MaterialTheme.typography.titleMedium)
             listOf(
-                TrackProfile.PRECISE to "Precisa: um ponto a cada 3 s ou 1,5 m. Melhor desenho, gasta mais bateria.",
-                TrackProfile.BALANCED to "Equilibrada: a cada 10 s ou 5 m. Boa para um dia de caminhada.",
-                TrackProfile.SAVER to "Economia: a cada 30 s ou 15 m. Para campanhas longas ou celular com bateria fraca."
+                TrackProfile.PRECISE to "Precisa: ponto a cada 3 s ou 1,5 m. Gasta mais bateria.",
+                TrackProfile.BALANCED to "Equilibrada: a cada 10 s ou 5 m.",
+                TrackProfile.SAVER to "Economia: a cada 30 s ou 15 m. Poupa bateria."
             ).forEach { (option, description) ->
                 Row(
                     Modifier.fillMaxWidth().clickable {
@@ -4463,7 +4478,7 @@ private fun TrackProfileCard(viewModel: AppViewModel) {
                 }
             }
             Text(
-                ui("Vale para a próxima trilha iniciada. Se a trilha parar com a tela apagada, tire o Oikos da otimização de bateria do aparelho."),
+                ui("Vale para a próxima trilha. Se ela parar com a tela apagada, tire o Oikos da otimização de bateria."),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -4652,13 +4667,13 @@ private fun OfflineMapsCard(viewModel: AppViewModel) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(ui("Mapas offline"), style = MaterialTheme.typography.titleMedium)
             Text(
-                ui("Use em campo, sem sinal, o mapa da sua área de estudo: imagem de satélite, carta topográfica ou mapa de vegetação. Gere no QGIS com a ferramenta \"Gerar tiles XYZ (MBTiles)\" e importe o arquivo .mbtiles aqui."),
+                ui("Mapa da sua área para usar sem sinal (satélite, topográfico, vegetação). Gere o .mbtiles no QGIS e importe aqui."),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             OfflineMapChoice(
                 selected = active == null,
                 title = ui("OpenStreetMap (internet)"),
-                details = ui("Precisa de internet; as áreas já vistas ficam guardadas por um tempo."),
+                details = ui("Precisa de internet."),
                 onSelect = { viewModel.setActiveOfflineMap(null) }
             )
             maps.forEach { map ->
@@ -4741,7 +4756,7 @@ private fun BackupCard(viewModel: AppViewModel) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(ui("Backup e restauração"), style = MaterialTheme.typography.titleMedium)
             Text(
-                ui("Um arquivo .zip com todos os projetos, fotos e áudios. Guarde fora do celular (computador, Drive, pen drive): é o que salva seus dados se o aparelho for perdido ou trocado."),
+                ui("Arquivo .zip com todos os projetos, fotos e áudios. Guarde fora do celular."),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
@@ -4865,7 +4880,7 @@ private fun AboutScreen(modifier: Modifier, onBack: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        ui("Mapas por © OpenStreetMap contributors. Municípios: IBGE, Malha Municipal 2022. Listas de espécies: Flora e Funga do Brasil (JBRJ) e Catálogo Taxonômico da Fauna do Brasil, CC BY 4.0, obtidas no IPT do JBRJ ou na cópia guardada pelo ChecklistBank."),
+                        ui("Mapa: © OpenStreetMap contributors (openstreetmap.org/copyright). Municípios: IBGE, Malha Municipal 2022, CC BY 4.0, adaptada para uso offline. Altitude: geoide EGM2008 (NGA). Listas de espécies: Flora e Funga do Brasil (JBRJ) e Catálogo Taxonômico da Fauna do Brasil, CC BY 4.0, obtidas no IPT do JBRJ ou na cópia do ChecklistBank."),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -4873,6 +4888,7 @@ private fun AboutScreen(modifier: Modifier, onBack: () -> Unit) {
             }
             }
             item { HowToCiteCard() }
+            item { OpenSourceLicensesCard() }
             item {
             DeveloperSignature(Modifier.fillMaxWidth().padding(top = 20.dp))
             }
@@ -4939,12 +4955,109 @@ private fun HowToCiteCard() {
     }
 }
 
+/**
+ * Bibliotecas de codigo aberto do app. A Apache 2.0 pede que o texto da
+ * licenca acompanhe o app, e o Google Play services traz avisos de
+ * componentes de terceiros (assets/licencas; o arquivo do Play services e
+ * gerado por tools/licencas/AvisosPlayServices.java).
+ */
+private val OPEN_SOURCE_LIBRARIES = listOf(
+    "AndroidX, Jetpack Compose" to "Apache 2.0",
+    "Kotlin, kotlinx.coroutines, kotlinx.serialization" to "Apache 2.0",
+    "osmdroid" to "Apache 2.0",
+    "ZXing" to "Apache 2.0",
+    "Google Play services Location" to "Android Software Development Kit License"
+)
+
+@Composable
+private fun OpenSourceLicensesCard() {
+    var reading by remember { mutableStateOf<Pair<String, String>?>(null) }
+    val apacheTitle = ui("Licença Apache 2.0")
+    val googleTitle = ui("Avisos de terceiros do Google Play services")
+    ExpandableInfoCard(ui("Licenças de código aberto")) {
+        Text(
+            ui("O Oikos usa estas bibliotecas de código aberto:"),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        OPEN_SOURCE_LIBRARIES.forEach { (name, license) ->
+            Text("$name: $license", style = MaterialTheme.typography.bodySmall)
+        }
+        TextButton(onClick = { reading = apacheTitle to "licencas/apache-2.0.txt" }) { Text(ui("Ler a licença Apache 2.0")) }
+        TextButton(onClick = { reading = googleTitle to "licencas/google_play_services.txt" }) { Text(googleTitle) }
+    }
+    reading?.let { (title, asset) -> LicenseTextDialog(title, asset, onDismiss = { reading = null }) }
+}
+
+/**
+ * Texto integral de uma licenca guardada em assets. Vai em paragrafos numa
+ * lista preguicosa: o arquivo do Play services tem cerca de 470 KB.
+ */
+@Composable
+private fun LicenseTextDialog(title: String, asset: String, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val paragraphs by androidx.compose.runtime.produceState<List<String>?>(null, asset) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                context.assets.open(asset).bufferedReader().use { it.readText() }
+                    .split(Regex("\\n\\s*\\n"))
+                    .map { it.trim().replace(Regex("\\s*\\n\\s*"), " ") }
+                    .filter { it.isNotEmpty() }
+            }.getOrDefault(emptyList())
+        }
+    }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            // 90% da altura e nao fillMaxSize: no Android 15+ a janela do dialogo
+            // passa da borda de baixo e o fim do texto ficava sob a barra de navegacao.
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.9f)
+                .padding(horizontal = 12.dp),
+            color = MaterialTheme.colorScheme.surface,
+            shape = MaterialTheme.shapes.large,
+            tonalElevation = 6.dp
+        ) {
+            Column(Modifier.padding(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    TextButton(onClick = onDismiss) { Text(ui("Fechar")) }
+                }
+                val list = paragraphs
+                when {
+                    list == null -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                    list.isEmpty() -> Text(ui("Não foi possível abrir o texto."), color = MaterialTheme.colorScheme.error)
+                    else -> LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(list) { paragraph ->
+                            if (paragraph.startsWith("### ")) {
+                                Text(
+                                    paragraph.removePrefix("### "),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    modifier = Modifier.padding(top = 12.dp)
+                                )
+                            } else {
+                                Text(paragraph, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /** Para onde vai (e nao vai) a informacao; aberto sob demanda nas Configuracoes. */
 @Composable
 private fun NetworkPrivacyCard() {
     ExpandableInfoCard(ui("Uso de rede e privacidade")) {
         Text(
-            ui("Seus registros, fotos e áudios ficam só neste aparelho; o app não os envia a nenhum servidor. A internet só é usada para: imagens do mapa (OpenStreetMap), quando não há mapa offline; baixar as listas de espécies; e sugerir endereço pelo Google, se você ligar a opção acima."),
+            ui("Seus dados ficam só neste aparelho e não vão para servidor nenhum. A internet serve apenas para o mapa, para baixar listas de espécies e, se ligado, para o endereço pelo Google."),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -4976,7 +5089,7 @@ private val englishText = mapOf(
     "Automático" to "Automatic",
     "Português" to "Portuguese",
     "Idioma do aplicativo" to "App language",
-    "Use automático para seguir o idioma do celular. Você também pode forçar português ou inglês manualmente." to "Use automatic to follow the phone language. You can also force Portuguese or English manually.",
+    "Automático segue o idioma do celular." to "Automatic follows the phone language.",
     "Caderno de Campo Digital" to "Digital Field Notebook",
     "Registre expedições, ocorrências, GPS, fotos e áudios com exportação Darwin Core." to "Record expeditions, occurrences, GPS, photos and audio with Darwin Core export.",
     "Criar projeto" to "Create project",
@@ -5178,7 +5291,13 @@ private val englishText = mapOf(
     "Se o Oikos ajudou no seu trabalho, cite o aplicativo. As exportações em ZIP trazem estas citações no arquivo COMO_CITAR.txt." to "If Oikos helped your work, please cite the app. ZIP exports include these citations in the COMO_CITAR.txt file.",
     "Copiar" to "Copy",
     "Copiado" to "Copied",
-    "Seus registros, fotos e áudios ficam só neste aparelho; o app não os envia a nenhum servidor. A internet só é usada para: imagens do mapa (OpenStreetMap), quando não há mapa offline; baixar as listas de espécies; e sugerir endereço pelo Google, se você ligar a opção acima." to "Your records, photos and audio stay only on this device; the app sends them to no server. The internet is used only for: map imagery (OpenStreetMap) when there is no offline map; downloading species lists; and suggesting an address via Google, if you turn on the option above.",
+    "Licenças de código aberto" to "Open-source licenses",
+    "O Oikos usa estas bibliotecas de código aberto:" to "Oikos uses these open-source libraries:",
+    "Licença Apache 2.0" to "Apache License 2.0",
+    "Ler a licença Apache 2.0" to "Read the Apache 2.0 license",
+    "Avisos de terceiros do Google Play services" to "Google Play services third-party notices",
+    "Não foi possível abrir o texto." to "Could not open the text.",
+    "Seus dados ficam só neste aparelho e não vão para servidor nenhum. A internet serve apenas para o mapa, para baixar listas de espécies e, se ligado, para o endereço pelo Google." to "Your data stays on this device and goes to no server. The internet is used only for the map, downloading species lists and, if turned on, the Google address.",
     "Darwin Core Archive (GBIF/SiBBr)" to "Darwin Core Archive (GBIF/SiBBr)",
     "Calculando o espaço usado..." to "Calculating storage use...",
     "Outro" to "Other",
@@ -5188,11 +5307,11 @@ private val englishText = mapOf(
     "Compartilhar, salvar ou enviar exportação" to "Share, save or send export",
     "Escuro" to "Dark",
     "Claro" to "Light",
-    "Tema de alto contraste para campo, com alternância sempre visível." to "High-contrast field theme with an always-visible toggle.",
+    "Alto contraste para uso ao sol." to "High contrast for use in sunlight.",
     "Tema de alto contraste para campo, com alternancia sempre visivel." to "High-contrast field theme with an always-visible toggle.",
     "Modo simples / coleta rápida" to "Simple mode / quick collection",
     "Modo simples / coleta rapida" to "Simple mode / quick collection",
-    "Menos campos visíveis por padrão; ideal para sol forte, pressa e uso prolongado." to "Fewer fields visible by default; ideal for strong sun, urgency and long field use.",
+    "Mostra menos campos no formulário." to "Shows fewer fields in the form.",
     "Cache do mapa" to "Map cache",
     "Apagar cache do mapa" to "Clear map cache",
     "Apagar cache do mapa?" to "Clear map cache?",
@@ -5210,7 +5329,7 @@ private val englishText = mapOf(
     "Enquanto você coleta, o Oikos organiza os dados em Darwin Core e prepara exportações em CSV, XLSX, JSON, GeoJSON e ZIP para uso em Excel, QGIS, R, Python e acervos científicos. De pesquisador para pesquisador." to "While you collect, Oikos organizes data in Darwin Core and prepares CSV, XLSX, JSON, GeoJSON and ZIP exports for Excel, QGIS, R, Python and scientific collections. From researcher to researcher.",
     "Créditos" to "Credits",
     "Aplicativo vinculado à pesquisa:" to "App linked to the research:",
-    "Mapas por © OpenStreetMap contributors. Municípios: IBGE, Malha Municipal 2022. Listas de espécies: Flora e Funga do Brasil (JBRJ) e Catálogo Taxonômico da Fauna do Brasil, CC BY 4.0, obtidas no IPT do JBRJ ou na cópia guardada pelo ChecklistBank." to "Maps by © OpenStreetMap contributors. Municipalities: IBGE, 2022 Municipal Mesh. Species lists: Flora e Funga do Brasil (JBRJ) and Catálogo Taxonômico da Fauna do Brasil, CC BY 4.0, obtained from the JBRJ IPT or the copy kept by ChecklistBank.",
+    "Mapa: © OpenStreetMap contributors (openstreetmap.org/copyright). Municípios: IBGE, Malha Municipal 2022, CC BY 4.0, adaptada para uso offline. Altitude: geoide EGM2008 (NGA). Listas de espécies: Flora e Funga do Brasil (JBRJ) e Catálogo Taxonômico da Fauna do Brasil, CC BY 4.0, obtidas no IPT do JBRJ ou na cópia do ChecklistBank." to "Map: © OpenStreetMap contributors (openstreetmap.org/copyright). Municipalities: IBGE, Malha Municipal 2022, CC BY 4.0, adapted for offline use. Altitude: EGM2008 geoid (NGA). Species lists: Flora e Funga do Brasil (JBRJ) and Catálogo Taxonômico da Fauna do Brasil, CC BY 4.0, from the JBRJ IPT or the ChecklistBank copy.",
     "Ajuda" to "Help",
     "Entendi" to "Got it",
     "Coordenadas" to "Coordinates",
@@ -5294,7 +5413,7 @@ private val englishText = mapOf(
     "Exportando..." to "Exporting...",
     "Montando o pacote. Com muitos áudios pode levar alguns minutos; não feche o app." to "Building the package. With many audio files this may take a few minutes; do not close the app.",
     "Mapa e uso offline" to "Map and offline use",
-    "A coleta, o GPS e a trilha funcionam sem internet. O mapa de fundo guarda os trechos já vistos: abra o mapa da área de trabalho enquanto houver internet e ele continua disponível em campo." to "Data collection, GPS and tracks work without internet. The base map keeps the areas already viewed: open the map of your work area while online and it stays available in the field.",
+    "O OpenStreetMap precisa de internet. Para campo sem sinal, importe um mapa offline (.mbtiles)." to "OpenStreetMap needs internet. For fieldwork without signal, import an offline map (.mbtiles).",
     "Sugerir município e estado pelo GPS" to "Suggest municipality and state from GPS",
     "Usa a internet: a coordenada capturada é enviada ao serviço de endereços do Google. Desligado, nada sai do aparelho. Deixe desligado em locais de espécies sensíveis." to "Uses the internet: the captured coordinate is sent to Google's address service. When off, nothing leaves the device. Keep it off at sites of sensitive species.",
     "Incerteza (m)" to "Uncertainty (m)",
@@ -5309,7 +5428,7 @@ private val englishText = mapOf(
     "Ocultar campos avançados" to "Hide advanced fields",
     "Mostrar campos avançados" to "Show advanced fields",
     "Backup e restauração" to "Backup and restore",
-    "Um arquivo .zip com todos os projetos, fotos e áudios. Guarde fora do celular (computador, Drive, pen drive): é o que salva seus dados se o aparelho for perdido ou trocado." to "A single .zip with all projects, photos and audio. Keep it off the phone (computer, Drive, USB stick): it is what saves your data if the device is lost or replaced.",
+    "Arquivo .zip com todos os projetos, fotos e áudios. Guarde fora do celular." to "A .zip with all projects, photos and audio. Keep it off the phone.",
     "Último backup" to "Last backup",
     "Nenhum backup feito neste aparelho." to "No backup made on this device.",
     "Criar backup" to "Create backup",
@@ -5353,9 +5472,9 @@ private val englishText = mapOf(
     "Outro" to "Other",
     "As listas de espécies já instaladas neste aparelho são mantidas." to "Species lists already installed on this device are kept.",
     "Listas de espécies" to "Species lists",
-    "Nenhuma instalada. Baixe a Flora e Funga do Brasil ou a Fauna do Brasil para ter autocompletar do nome científico em campo." to "None installed. Download Flora e Funga do Brasil or the Fauna do Brasil catalogue to get scientific name autocomplete in the field.",
+    "Nenhuma instalada. Baixe uma para completar nomes científicos em campo." to "None installed. Download one to complete scientific names in the field.",
     "Gerenciar" to "Manage",
-    "Baixe uma vez, com internet, e use em campo sem rede: o nome científico é sugerido enquanto você digita, a autoria e a família são preenchidas e sinônimos são trocados pelo nome aceito. As listas vêm direto da fonte oficial, e o app confere se há versão nova sempre que houver internet." to "Download once with internet and use in the field with no signal: the scientific name is suggested as you type, authorship and family are filled in and synonyms are replaced by the accepted name. Lists come straight from the official source, and the app checks for a new version whenever there is internet.",
+    "Baixe uma vez com internet e use em campo sem rede: o nome é sugerido enquanto você digita e sinônimos viram o nome aceito." to "Download once with internet and use offline in the field: names are suggested as you type and synonyms become the accepted name.",
     "Remover lista?" to "Remove list?",
     "Os registros já feitos não mudam. O autocompletar deixa de usar esta lista até você baixá-la de novo." to "Existing records do not change. Autocomplete stops using this list until you download it again.",
     "Remover lista" to "Remove list",
@@ -5364,10 +5483,10 @@ private val englishText = mapOf(
     "Qualquer lista publicada como Darwin Core Archive com núcleo Taxon, como as de outros países no GBIF, no ChecklistBank ou em um IPT. Baixe o arquivo .zip e importe aqui." to "Any list published as a Darwin Core Archive with a Taxon core, such as other countries' lists on GBIF, ChecklistBank or an IPT. Download the .zip file and import it here.",
     "Importar arquivo" to "Import file",
     "Brasil · plantas, algas e fungos" to "Brazil · plants, algae and fungi",
-    "Lista oficial do Jardim Botânico do Rio de Janeiro, republicada a cada atualização no IPT do JBRJ. CC BY 4.0." to "Official list from the Rio de Janeiro Botanical Garden, republished on the JBRJ IPT with every update. CC BY 4.0.",
+    "Lista oficial do JBRJ. CC BY 4.0." to "Official list from JBRJ. CC BY 4.0.",
     "Baixada da cópia guardada no ChecklistBank, porque o IPT do JBRJ recusou a conexão. A cópia pode estar algumas semanas atrás do IPT." to "Downloaded from the copy kept by ChecklistBank, because the JBRJ IPT refused the connection. The copy may be a few weeks behind the IPT.",
     "Brasil · animais" to "Brazil · animals",
-    "Catálogo oficial da fauna brasileira, publicado no IPT do JBRJ. CC BY 4.0." to "Official catalogue of Brazilian fauna, published on the JBRJ IPT. CC BY 4.0.",
+    "Catálogo oficial da fauna brasileira. CC BY 4.0." to "Official catalogue of Brazilian fauna. CC BY 4.0.",
     "Não instalada" to "Not installed",
     "cerca de" to "about",
     "para baixar" to "to download",
@@ -5444,10 +5563,10 @@ private val englishText = mapOf(
     "Pausar" to "Pause",
     "Ouvir" to "Listen",
     "Trilha GPS e bateria" to "GPS track and battery",
-    "Precisa: um ponto a cada 3 s ou 1,5 m. Melhor desenho, gasta mais bateria." to "Precise: a point every 3 s or 1.5 m. Best detail, uses more battery.",
-    "Equilibrada: a cada 10 s ou 5 m. Boa para um dia de caminhada." to "Balanced: every 10 s or 5 m. Good for a day of walking.",
-    "Economia: a cada 30 s ou 15 m. Para campanhas longas ou celular com bateria fraca." to "Saver: every 30 s or 15 m. For long campaigns or phones with weak batteries.",
-    "Vale para a próxima trilha iniciada. Se a trilha parar com a tela apagada, tire o Oikos da otimização de bateria do aparelho." to "Applies to the next track started. If the track stops with the screen off, exclude Oikos from the device battery optimization.",
+    "Precisa: ponto a cada 3 s ou 1,5 m. Gasta mais bateria." to "Precise: a point every 3 s or 1.5 m. Uses more battery.",
+    "Equilibrada: a cada 10 s ou 5 m." to "Balanced: every 10 s or 5 m.",
+    "Economia: a cada 30 s ou 15 m. Poupa bateria." to "Saver: every 30 s or 15 m. Saves battery.",
+    "Vale para a próxima trilha. Se ela parar com a tela apagada, tire o Oikos da otimização de bateria." to "Applies to the next track. If it stops with the screen off, exclude Oikos from battery optimization.",
     "Abrir otimização de bateria" to "Open battery optimization",
     "Protocolo (modelos)" to "Protocol (templates)",
     "Exemplo para este protocolo" to "Example for this protocol",
@@ -5487,16 +5606,16 @@ private val englishText = mapOf(
     "A expedição, com ocorrências, trilhas e mídias, vai para a lixeira e pode ser restaurada por 30 dias em Configurações > Lixeira." to "The expedition, with its occurrences, tracks and media, goes to the trash and can be restored for 30 days in Settings > Trash.",
     "O registro e suas fotos e áudios vão para a lixeira e podem ser restaurados por 30 dias em Configurações > Lixeira." to "The record and its photos and audio go to the trash and can be restored for 30 days in Settings > Trash.",
     "Sugerir endereço pelo Google" to "Suggest address via Google",
-    "No Brasil, município e estado já são sugeridos sem internet, pela malha do IBGE. Esta opção serve para coletas fora do Brasil e usa a internet: a coordenada capturada vai ao serviço de endereços do Google. Deixe desligada em locais de espécies sensíveis." to "In Brazil, municipality and state are already suggested offline from the IBGE mesh. This option is for collecting outside Brazil and uses the internet: the captured coordinate goes to the Google address service. Keep it off at sites with sensitive species.",
+    "Só para coletas fora do Brasil. Envia a coordenada ao Google." to "Only for collections outside Brazil. Sends the coordinate to Google.",
     "Copiando o mapa:" to "Copying the map:",
     "Copiando o mapa..." to "Copying the map...",
     "Remover mapa?" to "Remove map?",
     "O arquivo do mapa sai do aparelho. Os registros não mudam." to "The map file is removed from the device. Records do not change.",
     "Remover mapa" to "Remove map",
     "Mapas offline" to "Offline maps",
-    "Use em campo, sem sinal, o mapa da sua área de estudo: imagem de satélite, carta topográfica ou mapa de vegetação. Gere no QGIS com a ferramenta \"Gerar tiles XYZ (MBTiles)\" e importe o arquivo .mbtiles aqui." to "Use your study area map in the field with no signal: satellite image, topographic chart or vegetation map. Create it in QGIS with the \"Generate XYZ tiles (MBTiles)\" tool and import the .mbtiles file here.",
+    "Mapa da sua área para usar sem sinal (satélite, topográfico, vegetação). Gere o .mbtiles no QGIS e importe aqui." to "Your area map for use without signal (satellite, topographic, vegetation). Make the .mbtiles in QGIS and import it here.",
     "OpenStreetMap (internet)" to "OpenStreetMap (internet)",
-    "Precisa de internet; as áreas já vistas ficam guardadas por um tempo." to "Needs internet; areas already viewed stay cached for a while.",
+    "Precisa de internet." to "Needs internet.",
     "zoom" to "zoom",
     "Importar mapa (.mbtiles)" to "Import map (.mbtiles)"
 )
