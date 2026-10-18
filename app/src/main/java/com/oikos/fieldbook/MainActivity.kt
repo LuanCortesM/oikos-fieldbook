@@ -38,6 +38,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -3734,6 +3735,7 @@ private fun SettingsScreen(
                     })
                 }
             }
+            NetworkPrivacyCard()
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), elevation = CardDefaults.cardElevation(2.dp)) {
                 Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     // Os antigos controles de "area" e "detalhe" do cache eram
@@ -4867,12 +4869,6 @@ private fun AboutScreen(modifier: Modifier, onBack: () -> Unit) {
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Text(ui("Uso de rede e privacidade"), style = MaterialTheme.typography.labelLarge)
-                    Text(
-                        ui("Seus registros, fotos e áudios ficam só neste aparelho; o app não os envia a nenhum servidor. A internet só é usada para: imagens do mapa (OpenStreetMap), quando não há mapa offline; baixar as listas de espécies; e sugerir endereço pelo Google, se você ligar essa opção em Configurações."),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
             }
             }
@@ -4884,30 +4880,74 @@ private fun AboutScreen(modifier: Modifier, onBack: () -> Unit) {
     }
 }
 
-/** Citacao do aplicativo (ABNT e APA), com botao para copiar. */
+/**
+ * Cartao que abre e fecha pelo botao + / -: deixa as telas Sobre e
+ * Configuracoes curtas, com o detalhe a um toque.
+ */
+@Composable
+private fun ExpandableInfoCard(title: String, content: @Composable ColumnScope.() -> Unit) {
+    var open by rememberSaveable(title) { mutableStateOf(false) }
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.fillMaxWidth()) {
+            Row(
+                Modifier.fillMaxWidth().clickable { open = !open }.padding(start = 18.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                IconButton(onClick = { open = !open }) {
+                    Icon(if (open) Icons.Default.Remove else Icons.Default.Add, contentDescription = if (open) ui("Fechar") else ui("Abrir"))
+                }
+            }
+            AnimatedVisibility(visible = open) {
+                Column(Modifier.padding(start = 18.dp, end = 18.dp, bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
+            }
+        }
+    }
+}
+
+/** Citacao do aplicativo (ABNT, Vancouver e APA), cada uma com botao para copiar. */
 @Composable
 private fun HowToCiteCard() {
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
-    val abnt = remember { AppCitation.abnt(BuildConfig.VERSION_NAME) }
-    val apa = remember { AppCitation.apa(BuildConfig.VERSION_NAME) }
+    val citations = remember { AppCitation.all(BuildConfig.VERSION_NAME) }
     var copied by remember { mutableStateOf<String?>(null) }
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(ui("Como citar"), style = MaterialTheme.typography.titleMedium)
-            Text(
-                ui("Se o Oikos ajudou no seu trabalho, cite o aplicativo. As exportações em ZIP trazem esta citação no arquivo COMO_CITAR.txt."),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            listOf("ABNT" to abnt, "APA" to apa).forEach { (style, text) ->
-                Text(style, style = MaterialTheme.typography.labelLarge)
-                SelectionContainer { Text(text, style = MaterialTheme.typography.bodySmall) }
-                TextButton(onClick = {
-                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
-                    copied = style
-                }) { Text(if (copied == style) ui("Copiado") else "${ui("Copiar")} $style") }
+    ExpandableInfoCard(ui("Como citar")) {
+        Text(
+            ui("Se o Oikos ajudou no seu trabalho, cite o aplicativo. As exportações em ZIP trazem estas citações no arquivo COMO_CITAR.txt."),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text("DOI: ${AppCitation.DOI}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        citations.forEach { (style, text) ->
+            Text(style, style = MaterialTheme.typography.labelLarge)
+            // ABNT pede o titulo em destaque (NBR 6023, 6.7): negrito na tela.
+            val shown = if (style == "ABNT") {
+                androidx.compose.ui.text.buildAnnotatedString {
+                    val at = text.indexOf(AppCitation.TITLE)
+                    append(text)
+                    if (at >= 0) addStyle(androidx.compose.ui.text.SpanStyle(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), at, at + AppCitation.TITLE.length)
+                }
+            } else {
+                androidx.compose.ui.text.AnnotatedString(text)
             }
+            SelectionContainer { Text(shown, style = MaterialTheme.typography.bodySmall) }
+            TextButton(onClick = {
+                clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
+                copied = style
+            }) { Text(if (copied == style) ui("Copiado") else "${ui("Copiar")} $style") }
         }
+    }
+}
+
+/** Para onde vai (e nao vai) a informacao; aberto sob demanda nas Configuracoes. */
+@Composable
+private fun NetworkPrivacyCard() {
+    ExpandableInfoCard(ui("Uso de rede e privacidade")) {
+        Text(
+            ui("Seus registros, fotos e áudios ficam só neste aparelho; o app não os envia a nenhum servidor. A internet só é usada para: imagens do mapa (OpenStreetMap), quando não há mapa offline; baixar as listas de espécies; e sugerir endereço pelo Google, se você ligar a opção acima."),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -5135,10 +5175,10 @@ private val englishText = mapOf(
     "Versão" to "Version",
     "Uso de rede e privacidade" to "Network use and privacy",
     "Como citar" to "How to cite",
-    "Se o Oikos ajudou no seu trabalho, cite o aplicativo. As exportações em ZIP trazem esta citação no arquivo COMO_CITAR.txt." to "If Oikos helped your work, please cite the app. ZIP exports include this citation in the COMO_CITAR.txt file.",
+    "Se o Oikos ajudou no seu trabalho, cite o aplicativo. As exportações em ZIP trazem estas citações no arquivo COMO_CITAR.txt." to "If Oikos helped your work, please cite the app. ZIP exports include these citations in the COMO_CITAR.txt file.",
     "Copiar" to "Copy",
     "Copiado" to "Copied",
-    "Seus registros, fotos e áudios ficam só neste aparelho; o app não os envia a nenhum servidor. A internet só é usada para: imagens do mapa (OpenStreetMap), quando não há mapa offline; baixar as listas de espécies; e sugerir endereço pelo Google, se você ligar essa opção em Configurações." to "Your records, photos and audio stay only on this device; the app sends them to no server. The internet is used only for: map imagery (OpenStreetMap) when there is no offline map; downloading species lists; and suggesting an address via Google, if you turn that option on in Settings.",
+    "Seus registros, fotos e áudios ficam só neste aparelho; o app não os envia a nenhum servidor. A internet só é usada para: imagens do mapa (OpenStreetMap), quando não há mapa offline; baixar as listas de espécies; e sugerir endereço pelo Google, se você ligar a opção acima." to "Your records, photos and audio stay only on this device; the app sends them to no server. The internet is used only for: map imagery (OpenStreetMap) when there is no offline map; downloading species lists; and suggesting an address via Google, if you turn on the option above.",
     "Darwin Core Archive (GBIF/SiBBr)" to "Darwin Core Archive (GBIF/SiBBr)",
     "Calculando o espaço usado..." to "Calculating storage use...",
     "Outro" to "Other",

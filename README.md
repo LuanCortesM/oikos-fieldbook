@@ -2,6 +2,10 @@
 
 Aplicativo Android nativo em Kotlin + Jetpack Compose para coleta ecologica e biologica offline, com banco local Room/SQLite e exportacoes cientificas baseadas em Darwin Core.
 
+DOI (todas as versões): [10.5281/zenodo.20526746](https://doi.org/10.5281/zenodo.20526746)
+
+Como citar (APA): Maciel, L. S. C. (2026). *Oikos FieldBook* (Version 0.2.0) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.20526746
+
 ## Implementado neste MVP
 
 - Projetos de pesquisa offline.
