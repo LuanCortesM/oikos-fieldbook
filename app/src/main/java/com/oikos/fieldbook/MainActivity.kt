@@ -3377,21 +3377,30 @@ private tailrec fun Context.findActivity(): android.app.Activity? = when (this) 
 @Composable
 private fun SpectrogramDialog(media: MediaEntity, onDismiss: () -> Unit) {
     var maxKhz by rememberSaveable { mutableStateOf(12) }
+    // Tema de sol (claro): fundo branco e som em preto; tema escuro: escala Oikos.
+    val palette = if (MaterialTheme.colorScheme.background.luminance() > 0.5f) com.oikos.fieldbook.audio.SpectrogramPalette.GRAY_INVERTED
+    else com.oikos.fieldbook.audio.SpectrogramPalette.OIKOS
+    // Uma coluna por pixel da imagem: com 900 colunas espremidas em ~600 px, a
+    // reducao da tela diluia as notas curtas. O calculo ja guarda o maximo de
+    // cada trecho, entao menos colunas nao perdem nota.
+    val columnsTarget = with(androidx.compose.ui.platform.LocalDensity.current) {
+        (LocalConfiguration.current.screenWidthDp.dp.toPx() * 0.6f).toInt().coerceIn(300, 1200)
+    }
     var image by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     var result by remember { mutableStateOf<com.oikos.fieldbook.audio.SpectrogramResult?>(null) }
     var failed by remember { mutableStateOf(false) }
-    LaunchedEffect(media.filePath, maxKhz) {
+    LaunchedEffect(media.filePath, maxKhz, palette, columnsTarget) {
         image = null
         failed = false
         val computed = withContext(Dispatchers.Default) {
-            runCatching { DecodedSpectrogram.compute(File(media.filePath), maxColumns = 900, maxFrequencyHz = maxKhz * 1000.0) }.getOrNull()
+            runCatching { DecodedSpectrogram.compute(File(media.filePath), maxColumns = columnsTarget, maxFrequencyHz = maxKhz * 1000.0) }.getOrNull()
         }
         result = computed
         if (computed == null) {
             failed = true
         } else {
             image = withContext(Dispatchers.Default) {
-                android.graphics.Bitmap.createBitmap(computed.pixels(), computed.columns, computed.bins, android.graphics.Bitmap.Config.ARGB_8888).asImageBitmap()
+                android.graphics.Bitmap.createBitmap(computed.pixels(palette), computed.columns, computed.bins, android.graphics.Bitmap.Config.ARGB_8888).asImageBitmap()
             }
         }
     }
@@ -3452,7 +3461,8 @@ private fun SpectrogramDialog(media: MediaEntity, onDismiss: () -> Unit) {
                                             .offset { androidx.compose.ui.unit.IntOffset((maxWidth * progress.coerceIn(0f, 1f)).roundToPx(), 0) }
                                             .fillMaxHeight()
                                             .width(2.dp)
-                                            .background(Color.White)
+                                            // No fundo branco (tema de sol) o cursor branco sumiria.
+                                            .background(if (palette == com.oikos.fieldbook.audio.SpectrogramPalette.GRAY_INVERTED) Color(0xFFFF6A00) else Color.White)
                                     )
                                 }
                             }

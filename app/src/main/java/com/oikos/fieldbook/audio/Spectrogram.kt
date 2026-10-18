@@ -20,18 +20,52 @@ class SpectrogramResult(
     /** Coluna a coluna: db[column * bins + bin]. */
     val db: FloatArray
 ) {
-    /** Pixels ARGB (largura = colunas, altura = faixas; grave embaixo), com [rangeDb] de faixa dinamica. */
-    fun pixels(rangeDb: Float = 70f): IntArray {
-        val top = db.maxOrNull() ?: 0f
-        val floor = top - rangeDb
+    /**
+     * Pixels ARGB (largura = colunas, altura = faixas; grave embaixo).
+     *
+     * So na tela, o WAV nao muda: cada faixa de frequencia e mostrada acima do
+     * seu proprio ruido de fundo. Antes a escala era fixa, 70 dB abaixo do pico
+     * da gravacao, e com coro de insetos, riacho ou chuva o ruido ocupava a
+     * imagem e o canto sumia (gravacao de Aplastodiscus arildae de 20/12/2025).
+     * O fundo de cada faixa e o 20o percentil no tempo, e nao a mediana: com a
+     * mediana, um coro presente em mais da metade da gravacao seria tomado por
+     * ruido e apagado (conferido com um sinal de controle presente em 60% do
+     * tempo). Um som continuo do inicio ao fim ainda some, como em qualquer
+     * realce desse tipo. Gravacao muito curta usa a escala antiga.
+     */
+    fun pixels(palette: SpectrogramPalette = SpectrogramPalette.OIKOS): IntArray {
         val out = IntArray(columns * bins)
-        for (c in 0 until columns) {
-            for (b in 0 until bins) {
-                val value = ((db[c * bins + b] - floor) / rangeDb).coerceIn(0f, 1f)
-                out[(bins - 1 - b) * columns + c] = Palette.color(value)
+        if (columns < MIN_COLUMNS_FOR_FLOOR) {
+            val top = db.maxOrNull() ?: 0f
+            val floor = top - FIXED_RANGE_DB
+            for (c in 0 until columns) {
+                for (b in 0 until bins) {
+                    val value = ((db[c * bins + b] - floor) / FIXED_RANGE_DB).coerceIn(0f, 1f)
+                    out[(bins - 1 - b) * columns + c] = palette.color(value)
+                }
+            }
+            return out
+        }
+        val band = FloatArray(columns)
+        for (b in 0 until bins) {
+            for (c in 0 until columns) band[c] = db[c * bins + b]
+            band.sort()
+            val floor = band[(columns * NOISE_PERCENTILE).toInt()] + FLOOR_OFFSET_DB
+            for (c in 0 until columns) {
+                val value = ((db[c * bins + b] - floor) / ENHANCED_RANGE_DB).coerceIn(0f, 1f)
+                out[(bins - 1 - b) * columns + c] = palette.color(value)
             }
         }
         return out
+    }
+
+    companion object {
+        const val NOISE_PERCENTILE = 0.2f
+        /** Acima do 20o percentil: o ruido tambem oscila e nao deve acender a tela. */
+        const val FLOOR_OFFSET_DB = 7f
+        const val ENHANCED_RANGE_DB = 22f
+        const val FIXED_RANGE_DB = 70f
+        const val MIN_COLUMNS_FOR_FLOOR = 20
     }
 }
 
@@ -170,9 +204,17 @@ object Fft {
     }
 }
 
-/** Escala de cores escura -> clara (preto, roxo, laranja, amarelo), legivel ao sol. */
-object Palette {
-    private val stops = intArrayOf(0x000004, 0x3B0F70, 0x8C2981, 0xDE4968, 0xFE9F6D, 0xFCFDBF)
+/**
+ * Escalas de cor do espectrograma. Nas duas a claridade sobe (ou desce) sem
+ * voltar do silencio ao som mais forte, entao a leitura nao depende de
+ * enxergar cores.
+ */
+enum class SpectrogramPalette(private val stops: IntArray) {
+    /** Tema escuro: preto, marrom, o laranja do app, laranja claro e creme (L* de 5 a 96). */
+    OIKOS(intArrayOf(0x101114, 0x3A1A08, 0xA43F00, 0xFF6A00, 0xFFB27A, 0xFFF1E3)),
+
+    /** Tema para sol: fundo branco e som em preto, como nos espectrogramas publicados. */
+    GRAY_INVERTED(intArrayOf(0xFFFFFF, 0x000000));
 
     fun color(value: Float): Int {
         val position = value.coerceIn(0f, 1f) * (stops.size - 1)

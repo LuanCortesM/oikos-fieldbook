@@ -85,9 +85,41 @@ class SpectrogramTest {
     }
 
     @Test
-    fun paletaVaiDoEscuroAoClaro() {
-        assertEquals(0xFF000004.toInt(), Palette.color(0f))
-        assertEquals(0xFFFCFDBF.toInt(), Palette.color(1f))
+    fun paletasVaoDoSilencioAoSomForte() {
+        assertEquals(0xFF101114.toInt(), SpectrogramPalette.OIKOS.color(0f))
+        assertEquals(0xFFFFF1E3.toInt(), SpectrogramPalette.OIKOS.color(1f))
+        assertEquals(0xFFFFFFFF.toInt(), SpectrogramPalette.GRAY_INVERTED.color(0f))
+        assertEquals(0xFF000000.toInt(), SpectrogramPalette.GRAY_INVERTED.color(1f))
+    }
+
+    /** Na escala Oikos a claridade so sobe: a leitura nao depende de distinguir cores. */
+    @Test
+    fun escalaOikosSempreClareia() {
+        fun luminance(argb: Int): Double {
+            fun lin(c: Int): Double { val v = c / 255.0; return if (v <= 0.04045) v / 12.92 else Math.pow((v + 0.055) / 1.055, 2.4) }
+            return 0.2126 * lin(argb shr 16 and 255) + 0.7152 * lin(argb shr 8 and 255) + 0.0722 * lin(argb and 255)
+        }
+        var previous = -1.0
+        for (i in 0..100) {
+            val l = luminance(SpectrogramPalette.OIKOS.color(i / 100f))
+            assertTrue("claridade caiu em $i%", l >= previous)
+            previous = l
+        }
+    }
+
+    /** Canto presente em 60% do tempo nao pode ser tomado por ruido de fundo e apagado. */
+    @Test
+    fun coroFrequenteNaoSomeNoRealce() {
+        val columns = 100
+        val bins = 4
+        val db = FloatArray(columns * bins) { -60f }
+        for (c in 0 until columns) if (c % 10 < 6) db[c * bins + 2] = -20f
+        val result = SpectrogramResult(columns, bins, 8000, 10.0, 2000.0, db)
+        val pixels = result.pixels(SpectrogramPalette.GRAY_INVERTED)
+        // Faixa 2 (linha bins - 1 - 2): coluna com canto escura, sem canto branca.
+        val row = bins - 1 - 2
+        assertEquals(0xFF000000.toInt(), pixels[row * columns + 0])
+        assertEquals(0xFFFFFFFF.toInt(), pixels[row * columns + 7])
     }
 
     @Test
