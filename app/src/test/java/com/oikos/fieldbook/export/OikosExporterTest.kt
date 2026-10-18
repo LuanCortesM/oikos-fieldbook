@@ -210,6 +210,33 @@ class OikosExporterTest {
         assertTrue(eml, eml.contains("Oikos FieldBook, versão 9.9.9"))
     }
 
+    @Test
+    fun projetoEmInglesExportaPastasELeiaMeEmIngles() {
+        val audio = folder.newFile("b.wav").apply { writeBytes("RIFF".toByteArray() + ByteArray(4) + "WAVE".toByteArray()) }
+        val media = MediaEntity(
+            id = 8, projectId = 1, sessionId = 1, occurrenceId = 1, mediaType = "audio", filePath = audio.path, fileName = "b.wav",
+            mimeType = "audio/wav", createdAt = 1_800_000_000_000L
+        )
+        val english = project.copy(language = "en")
+        val zip = readZip(OikosExporter("9.9.9").export(
+            format = ExportFormat.Zip, project = english, sessions = listOf(session), occurrences = listOf(occurrence(1)),
+            media = listOf(media), fields = emptyList()
+        ) { name -> File(folder.root, "en_$name") }.file)
+        val keys = zip.keys.toString()
+        assertTrue(keys, zip.keys.all { it.startsWith("Project_anuros_da_serra/") })
+        assertTrue(keys, zip.keys.any { it.endsWith("/HOW_TO_CITE.txt") })
+        assertTrue(keys, zip.keys.any { it.endsWith("/01_main_spreadsheet/occurrences_darwin_core.csv") })
+        assertTrue(keys, zip.keys.any { it.endsWith("/02_supporting_tables/media.csv") })
+        assertTrue(keys, zip.keys.any { it.contains("/05_media/audios/") })
+        assertTrue(keys, zip.keys.none { it.contains("midias") || it.contains("planilha") })
+        val readme = zip.entries.first { it.key.endsWith("/README.txt") }.value
+        assertTrue(readme, readme.startsWith("Oikos FieldBook - Full export"))
+        val citation = zip.entries.first { it.key.endsWith("/HOW_TO_CITE.txt") }.value
+        assertTrue(citation, citation.startsWith("How to cite Oikos FieldBook") && citation.contains("APA"))
+        // O manifest lista os mesmos caminhos do ZIP.
+        assertTrue(zip.getValue("Project_anuros_da_serra/manifest.json").contains("05_media/audios/"))
+    }
+
     private fun readZip(file: File): Map<String, String> {
         val result = mutableMapOf<String, String>()
         ZipInputStream(file.inputStream()).use { zip ->

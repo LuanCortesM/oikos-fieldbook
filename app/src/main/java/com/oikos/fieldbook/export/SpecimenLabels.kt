@@ -42,6 +42,9 @@ object SpecimenLabels {
 
     fun content(project: ProjectEntity, session: SessionEntity?, occurrence: OccurrenceEntity): LabelContent {
         val dynamic = parseFlatJsonMap(occurrence.dynamicFieldsJson)
+        // Etiqueta no idioma do projeto.
+        val english = project.language.startsWith("en", ignoreCase = true)
+        fun formatDate(value: String) = formatDate(value, english)
         val authorship = dynamic["scientificNameAuthorship"].orEmpty()
         val name = occurrence.scientificName.trim()
         val italic = if (authorship.isNotBlank() && name.endsWith(authorship)) name.removeSuffix(authorship).trim() else name
@@ -72,7 +75,7 @@ object SpecimenLabels {
         val date = formatDate(dynamic["eventDate"].orEmpty().ifBlank { session?.eventDate.orEmpty() })
         val collection = listOf(
             collector,
-            occurrence.recordNumber.takeIf { it.isNotBlank() }?.let { "nº $it" }.orEmpty()
+            occurrence.recordNumber.takeIf { it.isNotBlank() }?.let { if (english) "No. $it" else "nº $it" }.orEmpty()
         ).filter { it.isNotBlank() }.joinToString(" ")
         val determiner = occurrence.identifiedBy.takeIf { it.isNotBlank() }?.let { by ->
             "Det. $by" + formatDate(occurrence.dateIdentified).takeIf { it.isNotBlank() }?.let { ", $it" }.orEmpty()
@@ -81,10 +84,10 @@ object SpecimenLabels {
         val lines = listOf(
             listOf(place, locality).filter { it.isNotBlank() }.joinToString(" "),
             listOf(coordinates, elevation).filter { it.isNotBlank() }.joinToString(" · "),
-            habitat.takeIf { it.isNotBlank() }?.let { "Hábitat: $it" }.orEmpty(),
+            habitat.takeIf { it.isNotBlank() }?.let { if (english) "Habitat: $it" else "Hábitat: $it" }.orEmpty(),
             remarks,
-            occurrence.vernacularName.takeIf { it.isNotBlank() }?.let { "Nome popular: $it" }.orEmpty(),
-            listOf(collection, date).filter { it.isNotBlank() }.joinToString(" · ").takeIf { it.isNotBlank() }?.let { "Col. $it" }.orEmpty(),
+            occurrence.vernacularName.takeIf { it.isNotBlank() }?.let { if (english) "Common name: $it" else "Nome popular: $it" }.orEmpty(),
+            listOf(collection, date).filter { it.isNotBlank() }.joinToString(" · ").takeIf { it.isNotBlank() }?.let { if (english) "Coll. $it" else "Col. $it" }.orEmpty(),
             determiner
         ).filter { it.isNotBlank() }
         val header = listOf(project.institution, project.name).filter { it.isNotBlank() }.distinct().joinToString(" · ")
@@ -102,8 +105,13 @@ object SpecimenLabels {
         )
     }
 
-    /** "2026-10-17" -> "17/10/2026"; outro formato fica como esta. */
-    fun formatDate(value: String): String = runCatching {
-        LocalDate.parse(value.trim().take(10)).format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))
+    /**
+     * "2026-10-17" -> "17/10/2026" (ou "17 Oct 2026" em ingles, sem a ambiguidade
+     * dia/mes); outro formato fica como esta.
+     */
+    fun formatDate(value: String, english: Boolean = false): String = runCatching {
+        val date = LocalDate.parse(value.trim().take(10))
+        if (english) date.format(DateTimeFormatter.ofPattern("d MMM yyyy", java.util.Locale.ENGLISH))
+        else date.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))
     }.getOrDefault(value.trim())
 }

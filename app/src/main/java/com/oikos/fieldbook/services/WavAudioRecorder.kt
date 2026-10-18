@@ -1,5 +1,7 @@
 package com.oikos.fieldbook.services
 
+import com.oikos.fieldbook.util.UiLanguage
+
 import android.Manifest
 import android.annotation.SuppressLint
 import android.media.AudioFormat
@@ -56,7 +58,7 @@ class WavAudioRecorder {
         stop()
         // A gravacao anterior precisa ter soltado o microfone e fechado o arquivo.
         last?.thread?.join(PREVIOUS_TIMEOUT_MILLIS)
-        if (last?.thread?.isAlive == true) throw IllegalStateException("A gravação anterior ainda está sendo fechada. Tente de novo em instantes.")
+        if (last?.thread?.isAlive == true) throw IllegalStateException(UiLanguage.t("A gravação anterior ainda está sendo fechada. Tente de novo em instantes.", "The previous recording is still being closed. Try again in a moment."))
         file.parentFile?.mkdirs()
         val minBuffer = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
         val bufferSize = minBuffer.coerceAtLeast(sampleRate)
@@ -73,14 +75,14 @@ class WavAudioRecorder {
             candidate?.release()
         }
         val recorder: AudioRecord = audioRecord
-            ?: throw IllegalStateException("Microfone indisponível: outro app pode estar gravando.")
+            ?: throw IllegalStateException(UiLanguage.t("Microfone indisponível: outro app pode estar gravando.", "Microphone unavailable: another app may be recording."))
         // Iniciado aqui para a falha aparecer na hora: durante uma ligacao o
         // Android aceita o pedido mas nao grava, e antes a tela mostrava
         // "gravando" sobre um arquivo vazio.
         val began = runCatching { recorder.startRecording() }.isSuccess && recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING
         if (!began) {
             recorder.release()
-            throw IllegalStateException("O microfone está ocupado (ligação em curso ou outro app gravando).")
+            throw IllegalStateException(UiLanguage.t("O microfone está ocupado (ligação em curso ou outro app gravando).", "The microphone is busy (a call in progress or another app recording)."))
         }
         sourceName = chosenSource
         lastError = null
@@ -99,7 +101,7 @@ class WavAudioRecorder {
                             val read = recorder.read(buffer, 0, buffer.size)
                             // Erro do microfone: antes o laco girava sem gravar
                             // nada e a tela seguia mostrando "gravando".
-                            if (read < 0) throw IOException("o microfone parou de responder (código $read)")
+                            if (read < 0) throw IOException(UiLanguage.t("o microfone parou de responder (código $read)", "the microphone stopped responding (code $read)"))
                             if (read == 0) continue
                             val count = minOf(read.toLong(), MAX_DATA_BYTES - bytes.get()).toInt() and 1.inv()
                             output.write(buffer, 0, count)
@@ -115,7 +117,7 @@ class WavAudioRecorder {
                                 // Para antes de encher o disco: sem espaco, nem o
                                 // registro do audio no banco seria gravado.
                                 if ((file.parentFile ?: file).usableSpace < MIN_FREE_BYTES) {
-                                    throw IOException("armazenamento quase cheio; a gravação foi encerrada para o áudio poder ser registrado")
+                                    throw IOException(UiLanguage.t("armazenamento quase cheio; a gravação foi encerrada para o áudio poder ser registrado", "storage almost full; the recording was stopped so the audio could be saved"))
                                 }
                             }
                         }

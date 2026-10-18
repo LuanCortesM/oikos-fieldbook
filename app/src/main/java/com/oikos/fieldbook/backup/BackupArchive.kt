@@ -1,5 +1,7 @@
 package com.oikos.fieldbook.backup
 
+import com.oikos.fieldbook.util.UiLanguage
+
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
@@ -116,7 +118,7 @@ object BackupArchive {
                     entry.name.startsWith(MEDIA_PREFIX) -> {
                         val target = File(root, entry.name.removePrefix(MEDIA_PREFIX)).canonicalFile
                         if (!target.path.startsWith(root.path + File.separator)) {
-                            throw IOException("Entrada inválida no backup: ${entry.name}")
+                            throw IOException(UiLanguage.t("Entrada inválida no backup: ${entry.name}", "Invalid entry in the backup: ${entry.name}"))
                         }
                         target.parentFile?.mkdirs()
                         FileOutputStream(target).use { zip.copyTo(it) }
@@ -124,8 +126,8 @@ object BackupArchive {
                 }
             }
         }
-        if (!databaseFound) throw IOException("O arquivo não contém o banco de dados do Oikos.")
-        return manifest ?: throw IOException("O arquivo não contém o manifesto do backup.")
+        if (!databaseFound) throw IOException(UiLanguage.t("O arquivo não contém o banco de dados do Oikos.", "The file does not contain the Oikos database."))
+        return manifest ?: throw IOException(UiLanguage.t("O arquivo não contém o manifesto do backup.", "The file does not contain the backup manifest."))
     }
 
     /**

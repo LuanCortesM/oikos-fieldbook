@@ -18,6 +18,7 @@ class OikosApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        com.oikos.fieldbook.util.UiLanguage.init(this)
         // Antes de qualquer acesso ao banco (que e lazy): conclui uma
         // restauracao preparada antes do reinicio do app.
         restoreOutcome = BackupService.applyPendingRestore(this)

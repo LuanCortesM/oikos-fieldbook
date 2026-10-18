@@ -1,5 +1,7 @@
 package com.oikos.fieldbook.services
 
+import com.oikos.fieldbook.util.UiLanguage
+
 import android.content.ContentValues
 import android.database.sqlite.SQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
@@ -81,7 +83,7 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
                     RowSnapshot.rows(db, "gps_track_points", "trackId IN (SELECT id FROM gps_tracks WHERE sessionId IN (SELECT id FROM sessions WHERE $sessionFilter)) ORDER BY trackId, timestamp, id", sessionArg)
                 )
         }
-        val project = tables.getJSONArray("projects").optJSONObject(0) ?: throw IOException("projeto não encontrado")
+        val project = tables.getJSONArray("projects").optJSONObject(0) ?: throw IOException(UiLanguage.t("projeto não encontrado", "project not found"))
         // Caminho relativo de cada midia: no outro aparelho a pasta do app e outra.
         val media = tables.getJSONArray("media")
         val files = mutableListOf<Pair<String, File>>()
@@ -144,7 +146,7 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
             val zip = ZipInputStream(input.buffered())
             val document = readDocument(zip)
             if (document.optInt("databaseVersion") > OikosDatabase.VERSION) {
-                throw IOException("o pacote foi feito numa versão mais nova do Oikos; atualize o app antes de importar")
+                throw IOException(UiLanguage.t("o pacote foi feito numa versão mais nova do Oikos; atualize o app antes de importar", "the package was made with a newer version of Oikos; update the app before importing"))
             }
             // As midias vao para uma area de preparo; so mudam de lugar depois
             // que o banco aceitar as linhas.
@@ -153,7 +155,7 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
                 val entry = zip.nextEntry ?: break
                 if (entry.isDirectory || !entry.name.startsWith("files/")) continue
                 val target = File(staging, entry.name.removePrefix("files/")).canonicalFile
-                if (!target.path.startsWith(stagingCanonical.path + File.separator)) throw IOException("caminho inválido no pacote: ${entry.name}")
+                if (!target.path.startsWith(stagingCanonical.path + File.separator)) throw IOException(UiLanguage.t("caminho inválido no pacote: ${entry.name}", "invalid path in the package: ${entry.name}"))
                 target.parentFile?.mkdirs()
                 target.outputStream().use { zip.copyTo(it) }
             }
@@ -194,9 +196,9 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
                     .mapNotNull { eventId -> existingSession(db, eventId) }
                 if (sessions.length() > 0 && alreadyThere.size == sessions.length()) {
                     val name = projectName(db, alreadyThere.first().projectId)
-                    throw IOException("este pacote já foi importado no projeto \"$name\". Para trazer novidades, escolha juntar a esse projeto")
+                    throw IOException(UiLanguage.t("este pacote já foi importado no projeto \"$name\". Para trazer novidades, escolha juntar a esse projeto", "this package was already imported into the project \"$name\". To bring in new data, choose to merge into that project"))
                 }
-                val projectRow = tables.getJSONArray("projects").optJSONObject(0) ?: throw IOException("o pacote não traz o projeto")
+                val projectRow = tables.getJSONArray("projects").optJSONObject(0) ?: throw IOException(UiLanguage.t("o pacote não traz o projeto", "the package does not contain the project"))
                 val name = uniqueProjectName(db, projectRow.optString("name").ifBlank { "Projeto importado" })
                 projectId = db.insert("projects", SQLiteDatabase.CONFLICT_ABORT, RowSnapshot.contentValues(
                     projectRow, RowSnapshot.columns(db, "projects"), skip = setOf("id"),
@@ -209,7 +211,7 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
             } else {
                 // Projeto apagado enquanto o pacote era escolhido: antes o banco
                 // recusava com uma mensagem tecnica.
-                if (!existsId(db, "projects", targetProjectId)) throw IOException("o projeto escolhido não existe mais")
+                if (!existsId(db, "projects", targetProjectId)) throw IOException(UiLanguage.t("o projeto escolhido não existe mais", "the chosen project no longer exists"))
                 projectId = targetProjectId
             }
 
@@ -251,7 +253,7 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
                     if (row.optLong("updatedAt") > local.updatedAt) occurrencesNewer++
                     return@forEachObject
                 }
-                val place = places[row.getLong("sessionId")] ?: throw IOException("pacote incompleto: ocorrência sem a expedição dela")
+                val place = places[row.getLong("sessionId")] ?: throw IOException(UiLanguage.t("pacote incompleto: ocorrência sem a expedição dela", "incomplete package: occurrence without its expedition"))
                 occurrences[row.getLong("id")] = place to db.insert("occurrences", SQLiteDatabase.CONFLICT_ABORT, RowSnapshot.contentValues(
                     row, occurrenceColumns, skip = setOf("id"), overrides = mapOf("projectId" to place.projectId, "sessionId" to place.sessionId)
                 ))
@@ -267,11 +269,11 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
                 val place: Place
                 val occurrenceId: Long?
                 if (oldOccurrence != null) {
-                    val known = occurrences[oldOccurrence] ?: throw IOException("pacote incompleto: mídia sem a ocorrência dela")
+                    val known = occurrences[oldOccurrence] ?: throw IOException(UiLanguage.t("pacote incompleto: mídia sem a ocorrência dela", "incomplete package: media file without its occurrence"))
                     place = known.first
                     occurrenceId = known.second
                 } else {
-                    place = places[row.getLong("sessionId")] ?: throw IOException("pacote incompleto: mídia sem a expedição dela")
+                    place = places[row.getLong("sessionId")] ?: throw IOException(UiLanguage.t("pacote incompleto: mídia sem a expedição dela", "incomplete package: media file without its expedition"))
                     occurrenceId = null
                 }
                 if (mediaExists(db, place.sessionId, occurrenceId, row.optString("fileName"), row.optLong("createdAt"))) return@forEachObject
@@ -281,7 +283,7 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
                 // fora da pasta do projeto.
                 val name = safeFileName(row.optString("fileName")).ifBlank { staged?.name?.let(::safeFileName).orEmpty() }.ifBlank { "midia" }
                 val target = uniqueFile(File(filesDir, "Projetos/PROJ-${place.projectId}/EXP-${place.sessionId}/$subfolder/$name"), reserved)
-                if (!target.canonicalFile.path.startsWith(projectsRoot.path + File.separator)) throw IOException("nome de arquivo inválido no pacote: ${row.optString("fileName")}")
+                if (!target.canonicalFile.path.startsWith(projectsRoot.path + File.separator)) throw IOException(UiLanguage.t("nome de arquivo inválido no pacote: ${row.optString("fileName")}", "invalid file name in the package: ${row.optString("fileName")}"))
                 reserved += target.path
                 db.insert("media", SQLiteDatabase.CONFLICT_ABORT, RowSnapshot.contentValues(
                     row, mediaColumns, skip = setOf("id", RELATIVE_KEY),
@@ -305,7 +307,7 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
             val trackColumns = RowSnapshot.columns(db, "gps_tracks")
             val pointColumns = RowSnapshot.columns(db, "gps_track_points")
             (tables.optJSONArray("gps_tracks") ?: JSONArray()).forEachObject { row ->
-                val place = places[row.getLong("sessionId")] ?: throw IOException("pacote incompleto: trilha sem a expedição dela")
+                val place = places[row.getLong("sessionId")] ?: throw IOException(UiLanguage.t("pacote incompleto: trilha sem a expedição dela", "incomplete package: track without its expedition"))
                 val points = packagePoints[row.getLong("id")].orEmpty()
                 val local = existingTrack(db, place.sessionId, row)
                 if (local == null) {
@@ -370,10 +372,10 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
     }
 
     private fun readDocument(zip: ZipInputStream): JSONObject {
-        val entry = zip.nextEntry ?: throw IOException("arquivo vazio")
-        if (entry.name != DATA_ENTRY) throw IOException("este arquivo não é um pacote de projeto do Oikos (se for um backup, use Restaurar em Configurações)")
+        val entry = zip.nextEntry ?: throw IOException(UiLanguage.t("arquivo vazio", "empty file"))
+        if (entry.name != DATA_ENTRY) throw IOException(UiLanguage.t("este arquivo não é um pacote de projeto do Oikos (se for um backup, use Restaurar em Configurações)", "this file is not an Oikos project package (if it is a backup, use Restore in Settings)"))
         val document = JSONObject(zip.readBytes().toString(Charsets.UTF_8))
-        if (document.optString("format") != FORMAT) throw IOException("formato de pacote desconhecido")
+        if (document.optString("format") != FORMAT) throw IOException(UiLanguage.t("formato de pacote desconhecido", "unknown package format"))
         return document
     }
 

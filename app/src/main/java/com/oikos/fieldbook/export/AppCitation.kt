@@ -59,8 +59,27 @@ object AppCitation {
         "APA" to apa(version)
     )
 
-    /** Conteudo do COMO_CITAR.txt das exportacoes. */
-    fun readme(version: String, exportedOn: LocalDate = LocalDate.now()): String = buildString {
+    /** Conteudo do COMO_CITAR.txt (ou HOW_TO_CITE.txt, projeto em ingles) das exportacoes. */
+    fun readme(version: String, english: Boolean = false, exportedOn: LocalDate = LocalDate.now()): String =
+        if (english) readmeEnglish(version, exportedOn) else readmePortuguese(version, exportedOn)
+
+    /** Em ingles, APA e Vancouver; a ABNT e norma brasileira e fica no arquivo em portugues. */
+    private fun readmeEnglish(version: String, exportedOn: LocalDate): String = buildString {
+        appendLine("How to cite Oikos FieldBook")
+        appendLine()
+        appendLine("These data were recorded with Oikos FieldBook, version $version (DOI $DOI).")
+        appendLine("If you use them in a paper, report or publication, please cite the app:")
+        listOf("APA" to apa(version), "Vancouver" to vancouver(version, exportedOn)).forEach { (style, text) ->
+            appendLine()
+            appendLine(style)
+            appendLine(text)
+        }
+        appendLine()
+        appendLine("If the scientific names came from a species list installed in the app,")
+        append("please cite the list as well (it appears in the nameAccordingTo column).")
+    }
+
+    private fun readmePortuguese(version: String, exportedOn: LocalDate): String = buildString {
         appendLine("Como citar o Oikos FieldBook")
         appendLine()
         appendLine("Estes dados foram registrados com o Oikos FieldBook, versão $version (DOI $DOI).")

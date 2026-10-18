@@ -1,5 +1,7 @@
 ﻿package com.oikos.fieldbook.services
 
+import com.oikos.fieldbook.util.UiLanguage
+
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -71,9 +73,9 @@ class MediaFileService(private val context: Context) {
         val dir = mediaDir(projectId, sessionId, type)
         val staging = uniqueFile(dir, base, "importando")
         try {
-            val input = context.contentResolver.openInputStream(uri) ?: throw java.io.IOException("o outro app não entregou o arquivo")
+            val input = context.contentResolver.openInputStream(uri) ?: throw java.io.IOException(UiLanguage.t("o outro app não entregou o arquivo", "the other app did not deliver the file"))
             input.use { source -> FileOutputStream(staging).use { output -> source.copyTo(output) } }
-            if (staging.length() == 0L) throw java.io.IOException("o arquivo escolhido está vazio")
+            if (staging.length() == 0L) throw java.io.IOException(UiLanguage.t("o arquivo escolhido está vazio", "the chosen file is empty"))
             val detected = MediaKind.detect(staging)
             val mime = detected?.mime ?: mimeType?.takeIf { it.isNotBlank() && it != "application/octet-stream" }
                 ?: if (type == "audio") "audio/*" else "image/*"

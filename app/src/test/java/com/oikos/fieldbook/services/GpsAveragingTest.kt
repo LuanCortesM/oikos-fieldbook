@@ -78,6 +78,15 @@ class GpsAveragingTest {
     }
 
     @Test
+    fun `observacao em ingles para projeto em ingles`() {
+        val fix = GpsAveraging.average(listOf(reading(-22.0, -45.0, 4.0, 0), reading(-22.0, -45.0, 6.0, 5000)))!!
+        val text = fix.remarks(english = true)
+        assertTrue(text.startsWith("Mean of 2 phone GNSS readings (2 received in 5 s)"))
+        assertTrue(text.contains("accuracy (median) 5.0 m"))
+        assertTrue(text.endsWith("uncertainty = max(2 × accuracy, spread)."))
+    }
+
+    @Test
     fun `protocolo cita o guia do GBIF com DOI`() {
         assertTrue(GpsAveraging.GBIF_PROTOCOL.contains("10.35035/e09p-h128"))
         assertTrue(GpsAveraging.GBIF_PROTOCOL.startsWith("Zermoglio PF"))

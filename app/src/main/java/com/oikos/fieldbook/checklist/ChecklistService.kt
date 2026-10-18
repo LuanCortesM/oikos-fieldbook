@@ -1,11 +1,14 @@
 package com.oikos.fieldbook.checklist
 
+import com.oikos.fieldbook.util.UiLanguage
+
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.oikos.fieldbook.data.ChecklistDao
 import com.oikos.fieldbook.data.ChecklistEntity
 import com.oikos.fieldbook.data.ChecklistDatabase
+import com.oikos.fieldbook.data.DistributionEntity
 import com.oikos.fieldbook.data.TaxonNameEntity
 import com.oikos.fieldbook.data.TaxonSuggestion
 import com.oikos.fieldbook.data.VernacularEntity
@@ -20,8 +23,11 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.zip.ZipFile
 
-/** Resultado da conferencia de um nome digitado; [synonymOf] preenchido quando so existe como sinonimo. */
-data class NameCheck(val found: Boolean, val synonymOf: String? = null)
+/**
+ * Resultado da conferencia de um nome digitado; [synonymOf] preenchido quando so
+ * existe como sinonimo; [distribution] do nome aceito, quando a lista traz.
+ */
+data class NameCheck(val found: Boolean, val synonymOf: String? = null, val distribution: TaxonDistribution? = null)
 
 /** Fonte oficial que o app sabe baixar sozinho. */
 data class ChecklistSource(
@@ -37,7 +43,9 @@ data class ChecklistSource(
     val mirrorInfoUrl: String,
     val approxDownloadMb: Int,
     /** Espaco no banco depois de importada, medido no emulador em 17/10/2026. */
-    val approxInstalledMb: Int
+    val approxInstalledMb: Int,
+    /** Copia enxuta que vem dentro do app (tools/listas/ListasEmbutidas.java). */
+    val embeddedAsset: String? = null
 ) {
     val candidateUrls: List<String> get() = listOf(archiveUrl, mirrorArchiveUrl)
 }
@@ -47,13 +55,36 @@ data class ChecklistSource(
  * so a data de publicacao, que e o pubDate do eml.xml da mesma versao.
  */
 data class RemoteVersion(val version: String?, val pubDate: String?) {
+    /**
+     * Mais nova so se for maior: a copia que vem no app pode ser mais recente
+     * que os metadados do ChecklistBank, e antes qualquer diferenca virava
+     * "versao nova disponivel".
+     */
     fun isNewerThan(installed: ChecklistEntity): Boolean = when {
-        version != null -> version != installed.version
-        pubDate != null -> pubDate != installed.pubDate.trim()
+        version != null && installed.version.isNotBlank() -> compareVersions(version, installed.version) > 0
+        pubDate != null && installed.pubDate.isNotBlank() -> pubDate.trim().take(10) > installed.pubDate.trim().take(10)
+        version != null || pubDate != null -> true
         else -> false
     }
 
     val label: String get() = version ?: pubDate.orEmpty()
+
+    companion object {
+        /** "393.432" x "393.430", parte a parte; texto que nao e numero compara como texto. */
+        fun compareVersions(a: String, b: String): Int {
+            val left = a.trim().split('.', '-')
+            val right = b.trim().split('.', '-')
+            for (i in 0 until maxOf(left.size, right.size)) {
+                val x = left.getOrNull(i).orEmpty()
+                val y = right.getOrNull(i).orEmpty()
+                val nx = x.toLongOrNull()
+                val ny = y.toLongOrNull()
+                val c = if (nx != null && ny != null) nx.compareTo(ny) else x.compareTo(y)
+                if (c != 0) return c
+            }
+            return 0
+        }
+    }
 }
 
 /**
@@ -76,7 +107,8 @@ object ChecklistSources {
             mirrorArchiveUrl = "https://api.checklistbank.org/dataset/2031/archive.zip",
             mirrorInfoUrl = "https://api.checklistbank.org/dataset/2031",
             approxDownloadMb = 20,
-            approxInstalledMb = 35
+            approxInstalledMb = 40,
+            embeddedAsset = "listas/flora_brasil.zip"
         ),
         ChecklistSource(
             key = "fauna_brasil",
@@ -88,7 +120,8 @@ object ChecklistSources {
             mirrorArchiveUrl = "https://api.checklistbank.org/dataset/281817/archive.zip",
             mirrorInfoUrl = "https://api.checklistbank.org/dataset/281817",
             approxDownloadMb = 18,
-            approxInstalledMb = 44
+            approxInstalledMb = 50,
+            embeddedAsset = "listas/fauna_brasil.zip"
         )
     )
 
@@ -123,14 +156,14 @@ class ChecklistService(private val context: Context, private val database: Check
             val neededMb = source.approxDownloadMb + source.approxInstalledMb + 50
             val freeMb = allocatableBytes(context, context.filesDir) / (1024 * 1024)
             if (freeMb < neededMb) {
-                throw IOException("espaço insuficiente: são necessários cerca de $neededMb MB livres e há $freeMb MB")
+                throw IOException(UiLanguage.t("espaço insuficiente: são necessários cerca de $neededMb MB livres e há $freeMb MB", "not enough space: about $neededMb MB free are needed and there are $freeMb MB"))
             }
             val zip = File(context.cacheDir, "checklist-${source.key}.zip")
             val failures = mutableListOf<String>()
             try {
                 for (url in source.candidateUrls) {
                     try {
-                        onProgress("Conectando...", null)
+                        onProgress(UiLanguage.t("Conectando...", "Connecting..."), null)
                         fetch(url, zip, onProgress)
                         return@withContext importZip(source.key, url, zip, onProgress)
                     } catch (error: IOException) {
@@ -157,15 +190,44 @@ class ChecklistService(private val context: Context, private val database: Check
                         if (read < 0) break
                         output.write(buffer, 0, read)
                         done += read
-                        onProgress("Baixando ${done / (1024 * 1024)} MB", if (total > 0) done.toFloat() / total else null)
+                        onProgress(UiLanguage.t("Baixando ${done / (1024 * 1024)} MB", "Downloading ${done / (1024 * 1024)} MB"), if (total > 0) done.toFloat() / total else null)
                     }
                 }
             }
         }
         // Um firewall pode responder 200 com uma pagina HTML no lugar do arquivo.
         val magic = target.inputStream().use { input -> ByteArray(4).also { input.read(it) } }
-        if (!(magic[0] == 'P'.code.toByte() && magic[1] == 'K'.code.toByte())) throw IOException("a resposta não é um arquivo .zip")
+        if (!(magic[0] == 'P'.code.toByte() && magic[1] == 'K'.code.toByte())) throw IOException(UiLanguage.t("a resposta não é um arquivo .zip", "the response is not a .zip file"))
     }
+
+    /**
+     * Lista oficial que precisa ser instalada da copia que vem no app: ainda nao
+     * instalada, ou importada antes da v3 do banco (sem grupos nem distribuicao).
+     */
+    suspend fun needsEmbeddedInstall(source: ChecklistSource): Boolean {
+        if (source.embeddedAsset == null) return false
+        val installed = dao.getBySource(source.key) ?: return true
+        return !dao.hasGroups(installed.id)
+    }
+
+    /** Instala a copia da lista que vem dentro do app, sem internet. */
+    suspend fun installEmbedded(source: ChecklistSource, onProgress: (stage: String, fraction: Float?) -> Unit): ChecklistEntity =
+        withContext(Dispatchers.IO) {
+            val asset = source.embeddedAsset ?: throw IOException(UiLanguage.t("Esta lista não vem no app.", "This list does not come with the app."))
+            val neededMb = source.approxInstalledMb + 30
+            val freeMb = allocatableBytes(context, context.filesDir) / (1024 * 1024)
+            if (freeMb < neededMb) {
+                throw IOException(UiLanguage.t("espaço insuficiente: são necessários cerca de $neededMb MB livres e há $freeMb MB", "not enough space: about $neededMb MB free are needed and there are $freeMb MB"))
+            }
+            val zip = File(context.cacheDir, "checklist-${source.key}-app.zip")
+            try {
+                onProgress(UiLanguage.t("Preparando a lista...", "Preparing the list..."), null)
+                context.assets.open(asset).use { input -> zip.outputStream().use { input.copyTo(it) } }
+                importZip(source.key, EMBEDDED_URL, zip, onProgress)
+            } finally {
+                zip.delete()
+            }
+        }
 
     /** Lista que o pesquisador baixou por conta propria (qualquer DwC-A de checklist). */
     suspend fun importFile(uri: Uri, onProgress: (stage: String, fraction: Float?) -> Unit): ChecklistEntity =
@@ -174,7 +236,7 @@ class ChecklistService(private val context: Context, private val database: Check
             val zip = File(context.cacheDir, "checklist-arquivo.zip")
             try {
                 context.contentResolver.openInputStream(uri)?.use { input -> zip.outputStream().use { input.copyTo(it) } }
-                    ?: throw IOException("Não foi possível ler o arquivo escolhido.")
+                    ?: throw IOException(UiLanguage.t("Não foi possível ler o arquivo escolhido.", "Could not read the chosen file."))
                 importZip("arquivo:$name", "", zip, onProgress)
             } finally {
                 zip.delete()
@@ -202,6 +264,7 @@ class ChecklistService(private val context: Context, private val database: Check
         try {
             val names = ArrayList<TaxonNameEntity>(BATCH)
             val vernaculars = ArrayList<VernacularEntity>(BATCH)
+            val distributions = ArrayList<DistributionEntity>(BATCH)
             var count = 0
             fun flushNames() {
                 if (names.isEmpty()) return
@@ -212,6 +275,11 @@ class ChecklistService(private val context: Context, private val database: Check
                 if (vernaculars.isEmpty()) return
                 database.runInTransaction { dao.insertVernacularsNow(vernaculars) }
                 vernaculars.clear()
+            }
+            fun flushDistributions() {
+                if (distributions.isEmpty()) return
+                database.runInTransaction { dao.insertDistributionsNow(distributions) }
+                distributions.clear()
             }
             val metadata = ZipFile(zipFile).use { zip ->
                 ChecklistParser.read(
@@ -231,7 +299,8 @@ class ChecklistService(private val context: Context, private val database: Check
                             kingdom = record.kingdom,
                             taxonClass = record.taxonClass,
                             taxonOrder = record.taxonOrder,
-                            searchKey = ChecklistParser.searchKey(record.canonicalName)
+                            searchKey = ChecklistParser.searchKey(record.canonicalName),
+                            groupCode = record.group
                         )
                         count++
                         if (names.size >= BATCH) flushNames()
@@ -243,12 +312,17 @@ class ChecklistService(private val context: Context, private val database: Check
                         )
                         if (vernaculars.size >= BATCH) flushVernaculars()
                     },
-                    onProgress = { done, total -> onProgress("Importando nomes", if (total > 0) done.toFloat() / total else null) }
+                    onProgress = { done, total -> onProgress(UiLanguage.t("Importando nomes", "Importing names"), if (total > 0) done.toFloat() / total else null) },
+                    onDistribution = { taxonId, distribution ->
+                        distributions += DistributionEntity.of(id, taxonId, distribution)
+                        if (distributions.size >= BATCH) flushDistributions()
+                    }
                 )
             }
             flushNames()
             flushVernaculars()
-            if (count == 0) throw IOException("O arquivo não contém nomes de táxons.")
+            flushDistributions()
+            if (count == 0) throw IOException(UiLanguage.t("O arquivo não contém nomes de táxons.", "The file does not contain taxon names."))
             val title = metadata.title.ifBlank { ChecklistSources.byKey(sourceKey)?.title ?: sourceKey.removePrefix("arquivo:") }
             dao.finishChecklist(id, count, metadata.version, metadata.pubDate, metadata.license, metadata.citation, title)
             dao.getBySource(sourceKey)?.let { old -> dao.deleteChecklist(old.id) }
@@ -271,15 +345,31 @@ class ChecklistService(private val context: Context, private val database: Check
      * Sugestoes para o autocompletar. "boa fab" acha Boana faber (prefixo de
      * cada palavra); nomes populares tambem sao buscados.
      */
-    suspend fun search(query: String, limit: Int = 8): List<TaxonSuggestion> {
+    suspend fun search(query: String, groups: Set<String> = emptySet(), limit: Int = 8): List<TaxonSuggestion> {
         val key = ChecklistParser.searchKey(query)
         if (key.length < 2) return emptyList()
         val tokens = key.split(' ').filter { it.isNotEmpty() }
         val first = tokens.first()
         val pattern = tokens.joinToString(" ") { "$it%" }
-        val scientific = dao.searchScientific(first, "$first~", pattern, limit)
-        val vernacular = if (scientific.size < limit) dao.searchVernacular(first, "$first~", pattern, limit - scientific.size) else emptyList()
+        // Sem grupo escolhido no projeto, valem todos.
+        val all = groups.isEmpty()
+        val chosen = groups.toList().ifEmpty { listOf("") }
+        val scientific = dao.searchScientific(first, "$first~", pattern, limit, all, chosen)
+        val vernacular = if (scientific.size < limit) dao.searchVernacular(first, "$first~", pattern, limit - scientific.size, all, chosen) else emptyList()
         return (scientific + vernacular).distinctBy { it.taxon.id }
+    }
+
+    /** Distribuicao do nome segundo a lista (do aceito, se for sinonimo). */
+    suspend fun distributionOf(taxon: TaxonNameEntity): TaxonDistribution? {
+        val id = if (taxon.status == TaxonStatus.SYNONYM.code && taxon.acceptedTaxonId.isNotBlank()) taxon.acceptedTaxonId else taxon.taxonId
+        val rows = dao.distributions(taxon.checklistId, id).map { it.toDistribution() }
+        if (rows.isEmpty()) return null
+        return TaxonDistribution(
+            states = rows.flatMap { it.states }.toSortedSet().toList(),
+            establishment = rows.flatMap { it.establishment }.distinct(),
+            endemic = rows.firstNotNullOfOrNull { it.endemic },
+            domains = rows.flatMap { it.domains }.toSortedSet().toList()
+        ).takeIf { !it.isEmpty }
     }
 
     /**
@@ -314,9 +404,11 @@ class ChecklistService(private val context: Context, private val database: Check
         val canonical = ChecklistParser.canonical(fullName, authorship)
         val matches = dao.exactMatches(ChecklistParser.searchKey(canonical))
         if (matches.isEmpty()) return NameCheck(found = false)
-        if (matches.any { it.status == TaxonStatus.ACCEPTED.code }) return NameCheck(found = true)
+        matches.firstOrNull { it.status == TaxonStatus.ACCEPTED.code }?.let { accepted ->
+            return NameCheck(found = true, distribution = distributionOf(accepted))
+        }
         val synonym = matches.firstOrNull { it.status == TaxonStatus.SYNONYM.code }
-        return NameCheck(found = true, synonymOf = synonym?.acceptedName?.ifBlank { "?" })
+        return NameCheck(found = true, synonymOf = synonym?.acceptedName?.ifBlank { "?" }, distribution = synonym?.let { distributionOf(it) })
     }
 
     /**
@@ -388,7 +480,7 @@ class ChecklistService(private val context: Context, private val database: Check
         val code = connection.responseCode
         if (code !in 200..299) {
             connection.disconnect()
-            throw IOException("erro HTTP $code")
+            throw IOException(UiLanguage.t("erro HTTP $code", "HTTP error $code"))
         }
         return connection
     }
@@ -403,12 +495,14 @@ class ChecklistService(private val context: Context, private val database: Check
 
     private fun describe(error: IOException): String = when (error) {
         is java.net.UnknownHostException, is java.net.ConnectException -> NO_CONNECTION
-        is java.net.SocketTimeoutException -> "a conexão ficou lenta demais e foi interrompida"
+        is java.net.SocketTimeoutException -> UiLanguage.t("a conexão ficou lenta demais e foi interrompida", "the connection got too slow and was interrupted")
         else -> error.message ?: error.javaClass.simpleName
     }
 
     companion object {
         private const val BATCH = 2_000
-        private const val NO_CONNECTION = "sem conexão com a internet"
+        /** sourceUrl de uma lista instalada da copia que vem no app. */
+        const val EMBEDDED_URL = "app"
+        private val NO_CONNECTION: String get() = UiLanguage.t("sem conexão com a internet", "no internet connection")
     }
 }

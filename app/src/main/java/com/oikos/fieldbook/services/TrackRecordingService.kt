@@ -78,8 +78,12 @@ class TrackRecordingService : Service() {
         if (now - lastFailureNotice < FAILURE_NOTICE_INTERVAL_MILLIS) return
         lastFailureNotice = now
         notifyProblem(
-            if (error is android.database.sqlite.SQLiteFullException) "Trilha GPS: sem espaço no aparelho, os pontos não estão sendo salvos. Libere espaço."
-            else "Trilha GPS: falha ao salvar pontos (${error.message ?: error.javaClass.simpleName})."
+            if (error is android.database.sqlite.SQLiteFullException) {
+                t("Trilha GPS: sem espaço no aparelho, os pontos não estão sendo salvos. Libere espaço.", "GPS track: no space left on the device, points are not being saved. Free up space.")
+            } else {
+                val reason = error.message ?: error.javaClass.simpleName
+                t("Trilha GPS: falha ao salvar pontos ($reason).", "GPS track: could not save points ($reason).")
+            }
         )
     }
 
@@ -116,15 +120,15 @@ class TrackRecordingService : Service() {
             ServiceCompat.startForeground(
                 this,
                 NOTIFICATION_ID,
-                notification("Trilha GPS ativa. Gravando mesmo com a tela bloqueada."),
+                notification(t("Trilha GPS ativa. Gravando mesmo com a tela bloqueada.", "GPS track active. Recording even with the screen locked.")),
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0
             )
         }.isSuccess
         if (!started) {
             // Aviso separado e que fica: a notificacao do servico some ao parar,
             // e antes o pesquisador nunca ficava sabendo que a trilha nao gravou.
-            notifyProblem("Trilha GPS não iniciada: o Oikos está sem permissão de localização.")
-            runCatching { startForeground(NOTIFICATION_ID, notification("Trilha GPS interrompida.")) }
+            notifyProblem(t("Trilha GPS não iniciada: o Oikos está sem permissão de localização.", "GPS track not started: Oikos has no location permission."))
+            runCatching { startForeground(NOTIFICATION_ID, notification(t("Trilha GPS interrompida.", "GPS track stopped."))) }
             stopRecording()
             return
         }
@@ -167,14 +171,14 @@ class TrackRecordingService : Service() {
         callback = null
         val manager = getSystemService(LocationManager::class.java)
         if (manager == null || !manager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-            notifyProblem("Trilha GPS sem sinal: o GPS do aparelho está desligado.")
+            notifyProblem(t("Trilha GPS sem sinal: o GPS do aparelho está desligado.", "GPS track without signal: the device GPS is turned off."))
             return
         }
         val listener = LocationListener { location -> positions.trySend(trackId to location) }
         systemListener = listener
         runCatching {
             manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, profile.intervalMillis, profile.minDistanceMeters, listener, Looper.getMainLooper())
-        }.onFailure { notifyProblem("Trilha GPS sem sinal: não foi possível ligar o GPS do aparelho.") }
+        }.onFailure { notifyProblem(t("Trilha GPS sem sinal: não foi possível ligar o GPS do aparelho.", "GPS track without signal: could not turn on the device GPS.")) }
     }
 
     private fun hasPlayServices(): Boolean =
@@ -198,7 +202,10 @@ class TrackRecordingService : Service() {
         getSystemService(NotificationManager::class.java)
             .notify(
                 NOTIFICATION_ID,
-                notification("Trilha ativa - ${recorded.pointsCount} pontos - ${formatDistance(recorded.totalDistance)} - ${formatClock(timestamp)}")
+                notification(
+                    t("Trilha ativa - ${recorded.pointsCount} pontos", "Track active - ${recorded.pointsCount} points") +
+                        " - ${formatDistance(recorded.totalDistance)} - ${formatClock(timestamp)}"
+                )
             )
     }
 
@@ -250,8 +257,10 @@ class TrackRecordingService : Service() {
         wakeLock = null
     }
 
+    private fun t(pt: String, en: String): String = com.oikos.fieldbook.util.UiLanguage.t(pt, en)
+
     private fun ensureChannel() {
-        val channel = NotificationChannel(CHANNEL_ID, "Trilha GPS", NotificationManager.IMPORTANCE_LOW)
+        val channel = NotificationChannel(CHANNEL_ID, t("Trilha GPS", "GPS track"), NotificationManager.IMPORTANCE_LOW)
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 

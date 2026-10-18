@@ -30,7 +30,7 @@ abstract class OikosDatabase : RoomDatabase() {
 
     companion object {
         /** Versao atual do esquema; o backup recusa arquivos de versao maior. */
-        const val VERSION = 7
+        const val VERSION = 8
 
         fun create(context: Context): OikosDatabase =
             Room.databaseBuilder(context, OikosDatabase::class.java, "oikos_fieldbook.db")
@@ -40,10 +40,11 @@ abstract class OikosDatabase : RoomDatabase() {
                 .addMigrations(MIGRATION_4_5)
                 .addMigrations(MIGRATION_5_6)
                 .addMigrations(MIGRATION_6_7)
+                .addMigrations(MIGRATION_7_8)
                 .build()
 
         /** Visivel para o teste de migracao. */
-        val ALL_MIGRATIONS: Array<Migration> get() = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+        val ALL_MIGRATIONS: Array<Migration> get() = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -170,6 +171,13 @@ abstract class OikosDatabase : RoomDatabase() {
         private val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 addColumnIfMissing(db, "media", "captureTimeKnown", "INTEGER NOT NULL DEFAULT 1")
+            }
+        }
+
+        /** Grupos das listas de especies usados nas sugestoes de nome do projeto (vazio = todos). */
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                addColumnIfMissing(db, "projects", "nameGroups", "TEXT NOT NULL DEFAULT ''")
             }
         }
 

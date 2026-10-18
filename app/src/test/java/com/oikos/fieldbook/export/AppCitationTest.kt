@@ -36,7 +36,7 @@ class AppCitationTest {
 
     @Test
     fun leiaMeTrazAsTresFormas() {
-        val text = AppCitation.readme("0.2.0", LocalDate.of(2026, 5, 2))
+        val text = AppCitation.readme("0.2.0", exportedOn = LocalDate.of(2026, 5, 2))
         listOf("ABNT", "Vancouver", "APA", "Acesso em: 2 maio 2026.", "[cited 2026 May 2]", "10.5281/zenodo.20526746").forEach {
             assertTrue(it, text.contains(it))
         }

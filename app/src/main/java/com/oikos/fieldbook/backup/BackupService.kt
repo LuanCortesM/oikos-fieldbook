@@ -1,5 +1,7 @@
 package com.oikos.fieldbook.backup
 
+import com.oikos.fieldbook.util.UiLanguage
+
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
@@ -60,7 +62,7 @@ class BackupService(private val app: OikosApplication) {
         )
         try {
             val output = app.contentResolver.openOutputStream(target, "wt")
-                ?: throw IOException("Não foi possível abrir o destino do backup.")
+                ?: throw IOException(UiLanguage.t("Não foi possível abrir o destino do backup.", "Could not open the backup destination."))
             output.use { BackupArchive.write(it, manifest, snapshot, mediaRoot, onProgress) }
         } finally {
             snapshot.delete()
@@ -76,7 +78,7 @@ class BackupService(private val app: OikosApplication) {
     private fun makeSelfContained(snapshot: File) {
         SQLiteDatabase.openDatabase(snapshot.path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
             db.rawQuery("PRAGMA journal_mode=DELETE", null).use { it.moveToFirst() }
-            checkIntegrity(db, "a cópia do banco para o backup")
+            checkIntegrity(db, UiLanguage.t("a cópia do banco para o backup", "the database copy for the backup"))
         }
         File(snapshot.path + "-wal").delete()
         File(snapshot.path + "-shm").delete()
@@ -84,7 +86,7 @@ class BackupService(private val app: OikosApplication) {
 
     private fun checkIntegrity(db: SQLiteDatabase, what: String) {
         val result = db.rawQuery("PRAGMA integrity_check", null).use { if (it.moveToFirst()) it.getString(0) else "" }
-        if (result != "ok") throw IOException("$what está corrompida ($result).")
+        if (result != "ok") throw IOException(UiLanguage.t("$what está corrompida ($result).", "$what is corrupted ($result)."))
     }
 
     suspend fun inspect(source: Uri): BackupManifest? = withContext(Dispatchers.IO) {
@@ -99,10 +101,10 @@ class BackupService(private val app: OikosApplication) {
         try {
             val stagedDatabase = File(staging, DATABASE_NAME)
             val stagedMedia = File(staging, MEDIA_DIR)
-            val input = app.contentResolver.openInputStream(source) ?: throw IOException("Não foi possível ler o arquivo escolhido.")
+            val input = app.contentResolver.openInputStream(source) ?: throw IOException(UiLanguage.t("Não foi possível ler o arquivo escolhido.", "Could not read the chosen file."))
             val manifest = input.use { BackupArchive.extract(it, stagedDatabase, stagedMedia) }
             if (manifest.databaseVersion > OikosDatabase.VERSION) {
-                throw IOException("Este backup foi feito numa versão mais nova do Oikos. Atualize o app antes de restaurar.")
+                throw IOException(UiLanguage.t("Este backup foi feito numa versão mais nova do Oikos. Atualize o app antes de restaurar.", "This backup was made with a newer version of Oikos. Update the app before restoring."))
             }
             prepareStagedDatabase(stagedDatabase)
             rewriteMediaPaths(stagedDatabase, manifest.filesDir, app.filesDir.absolutePath)
@@ -124,7 +126,7 @@ class BackupService(private val app: OikosApplication) {
         SQLiteDatabase.openDatabase(databaseFile.path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
             checkIntegrity(db, "O banco dentro do backup")
             if (db.version > OikosDatabase.VERSION) {
-                throw IOException("Este backup foi feito numa versão mais nova do Oikos. Atualize o app antes de restaurar.")
+                throw IOException(UiLanguage.t("Este backup foi feito numa versão mais nova do Oikos. Atualize o app antes de restaurar.", "This backup was made with a newer version of Oikos. Update the app before restoring."))
             }
             db.execSQL(
                 "UPDATE gps_tracks SET endTime = COALESCE(endTime, (SELECT MAX(timestamp) FROM gps_track_points p WHERE p.trackId = gps_tracks.id), startTime), " +
@@ -201,13 +203,13 @@ class BackupService(private val app: OikosApplication) {
                 } catch (error: Throwable) {
                     newSafety.deleteRecursively()
                     staging.deleteRecursively()
-                    return RestoreOutcome.Failed("não foi possível guardar uma cópia do banco atual (${error.message ?: error.javaClass.simpleName}). Nada foi alterado.")
+                    return RestoreOutcome.Failed(UiLanguage.t("não foi possível guardar uma cópia do banco atual (${error.message ?: error.javaClass.simpleName}). Nada foi alterado.", "could not keep a copy of the current database (${error.message ?: error.javaClass.simpleName}). Nothing was changed."))
                 }
                 safety.deleteRecursively()
                 if (!newSafety.renameTo(safety)) {
                     newSafety.deleteRecursively()
                     staging.deleteRecursively()
-                    return RestoreOutcome.Failed("não foi possível guardar uma cópia do banco atual. Nada foi alterado.")
+                    return RestoreOutcome.Failed(UiLanguage.t("não foi possível guardar uma cópia do banco atual. Nada foi alterado.", "could not keep a copy of the current database. Nothing was changed."))
                 }
             }
             // Sem banco atual (nova tentativa depois de uma interrupcao): a copia
@@ -217,7 +219,7 @@ class BackupService(private val app: OikosApplication) {
                 databaseFile.parentFile?.mkdirs()
                 stagedDatabase.copyTo(databaseFile, overwrite = true)
                 previousMedia.deleteRecursively()
-                if (mediaRoot.exists() && !mediaRoot.renameTo(previousMedia)) throw IOException("não foi possível mover as mídias atuais")
+                if (mediaRoot.exists() && !mediaRoot.renameTo(previousMedia)) throw IOException(UiLanguage.t("não foi possível mover as mídias atuais", "could not move the current media files"))
                 if (stagedMedia.exists()) {
                     if (!stagedMedia.renameTo(mediaRoot)) stagedMedia.copyRecursively(mediaRoot, overwrite = true)
                 } else {

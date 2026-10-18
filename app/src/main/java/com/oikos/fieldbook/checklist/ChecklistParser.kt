@@ -1,5 +1,7 @@
 package com.oikos.fieldbook.checklist
 
+import com.oikos.fieldbook.util.UiLanguage
+
 import org.w3c.dom.Element
 import java.io.BufferedReader
 import java.io.InputStream
@@ -27,7 +29,9 @@ data class TaxonRecord(
     val kingdom: String,
     /** Classe e ordem (dwc:class, dwc:order), quando a lista traz. */
     val taxonClass: String = "",
-    val taxonOrder: String = ""
+    val taxonOrder: String = "",
+    /** Grupo para o filtro do projeto ([NameGroup.code]); "" se nao da para saber. */
+    val group: String = ""
 )
 
 enum class TaxonStatus(val code: String) {
@@ -72,6 +76,7 @@ object ChecklistParser {
     private const val DWC = "http://rs.tdwg.org/dwc/terms/"
     private const val TAXON_ROW = "http://rs.tdwg.org/dwc/terms/Taxon"
     private const val VERNACULAR_ROW = "http://rs.gbif.org/terms/1.0/VernacularName"
+    private const val DISTRIBUTION_ROW = "http://rs.gbif.org/terms/1.0/Distribution"
 
     private data class FileSpec(
         val location: String,
@@ -86,15 +91,19 @@ object ChecklistParser {
         zip: ZipFile,
         onTaxon: (TaxonRecord) -> Unit,
         onVernacular: (taxonId: String, name: String, language: String) -> Unit,
-        onProgress: (bytesRead: Long, totalBytes: Long) -> Unit = { _, _ -> }
+        onProgress: (bytesRead: Long, totalBytes: Long) -> Unit = { _, _ -> },
+        onDistribution: (taxonId: String, distribution: TaxonDistribution) -> Unit = { _, _ -> }
     ): ChecklistMetadata {
-        val meta = zip.getEntry("meta.xml") ?: throw IllegalArgumentException("Arquivo sem meta.xml: não é um Darwin Core Archive.")
+        val meta = zip.getEntry("meta.xml") ?: throw IllegalArgumentException(UiLanguage.t("Arquivo sem meta.xml: não é um Darwin Core Archive.", "File without meta.xml: it is not a Darwin Core Archive."))
         val specs = zip.getInputStream(meta).use { parseMeta(it) }
-        val core = specs[TAXON_ROW] ?: throw IllegalArgumentException("O arquivo não é uma lista de espécies (core Taxon).")
-        val coreEntry = zip.getEntry(core.location) ?: throw IllegalArgumentException("Arquivo ${core.location} ausente.")
+        val core = specs[TAXON_ROW] ?: throw IllegalArgumentException(UiLanguage.t("O arquivo não é uma lista de espécies (core Taxon).", "The file is not a species list (Taxon core)."))
+        val coreEntry = zip.getEntry(core.location) ?: throw IllegalArgumentException(UiLanguage.t("Arquivo ${core.location} ausente.", "File ${core.location} is missing."))
         val vernacularSpec = specs[VERNACULAR_ROW]
         val vernacularEntry = vernacularSpec?.let { zip.getEntry(it.location) }
-        val total = coreEntry.size.coerceAtLeast(0) + (vernacularEntry?.size?.coerceAtLeast(0) ?: 0)
+        val distributionSpec = specs[DISTRIBUTION_ROW]
+        val distributionEntry = distributionSpec?.let { zip.getEntry(it.location) }
+        val total = coreEntry.size.coerceAtLeast(0) + (vernacularEntry?.size?.coerceAtLeast(0) ?: 0) +
+            (distributionEntry?.size?.coerceAtLeast(0) ?: 0)
 
         var read = 0L
         readRows(zip, coreEntry, core) { cells, bytes ->
@@ -112,6 +121,39 @@ object ChecklistParser {
                 if (id.isNotEmpty() && name.isNotEmpty()) onVernacular(id, name, languageIndex?.let { cells.getOrNull(it) }.orEmpty())
                 onProgress(read, total)
             }
+        }
+        if (distributionSpec != null && distributionEntry != null) {
+            // Uma linha por estado na fonte oficial, ja agrupadas por taxon: junta
+            // as linhas seguidas do mesmo taxon em um registro so.
+            val location = distributionSpec.columns[DWC + "locationID"]
+            val means = distributionSpec.columns[DWC + "establishmentMeans"]
+            val remarks = distributionSpec.columns[DWC + "occurrenceRemarks"]
+            var currentId = ""
+            val locations = ArrayList<String>()
+            val establishment = ArrayList<String>()
+            val notes = ArrayList<String>()
+            fun flush() {
+                if (currentId.isNotEmpty()) {
+                    val distribution = TaxonDistribution.parse(locations, establishment, notes)
+                    if (!distribution.isEmpty) onDistribution(currentId, distribution)
+                }
+                locations.clear(); establishment.clear(); notes.clear()
+            }
+            readRows(zip, distributionEntry, distributionSpec) { cells, bytes ->
+                read += bytes
+                val id = cells.getOrNull(distributionSpec.idIndex).orEmpty().trim()
+                if (id.isNotEmpty()) {
+                    if (id != currentId) {
+                        flush()
+                        currentId = id
+                    }
+                    location?.let { cells.getOrNull(it) }?.let { if (it.isNotBlank()) locations += it }
+                    means?.let { cells.getOrNull(it) }?.let { if (it.isNotBlank()) establishment += it }
+                    remarks?.let { cells.getOrNull(it) }?.let { if (it.isNotBlank()) notes += it }
+                }
+                onProgress(read, total)
+            }
+            flush()
         }
         val emlEntry = zip.getEntry("eml.xml")
         return emlEntry?.let { entry -> zip.getInputStream(entry).use { parseEml(it) } } ?: ChecklistMetadata("", "", "", "", "")
@@ -150,11 +192,14 @@ object ChecklistParser {
     }
 
     private fun toTaxon(cells: List<String>, spec: FileSpec): TaxonRecord? {
-        fun cell(term: String): String = spec.columns[DWC + term]?.let { cells.getOrNull(it) }.orEmpty().trim()
+        // "NA" aparece na lista da Flora no lugar de familia/genero vazios.
+        fun cell(term: String): String = spec.columns[DWC + term]?.let { cells.getOrNull(it) }.orEmpty().trim().let { if (it == "NA") "" else it }
         val id = cell("taxonID").ifEmpty { cells.getOrNull(spec.idIndex).orEmpty().trim() }
         val fullName = cell("scientificName")
         if (id.isEmpty() || fullName.isEmpty()) return null
-        val authorship = cell("scientificNameAuthorship")
+        // Na Fauna, algumas linhas trazem o proprio nome no lugar da autoria ("Maldanidae"
+        // com autoria "Maldanidae"): sem esse cuidado o nome ficava vazio.
+        val authorship = cell("scientificNameAuthorship").takeIf { it != fullName }.orEmpty()
         return TaxonRecord(
             taxonId = id,
             canonicalName = canonical(fullName, authorship, cell("genus"), cell("specificEpithet"), cell("infraspecificEpithet")),
@@ -167,7 +212,8 @@ object ChecklistParser {
             genus = cell("genus"),
             kingdom = cell("kingdom"),
             taxonClass = cell("class"),
-            taxonOrder = cell("order")
+            taxonOrder = cell("order"),
+            group = NameGroup.groupOf(cell("kingdom"), cell("phylum"), cell("class"), cell("order"), cell("higherClassification"))
         )
     }
 

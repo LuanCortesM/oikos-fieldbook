@@ -38,6 +38,12 @@ data class ProjectEntity(
     val mediaBaseUrl: String = "",
     /** CSV de planilha: "br" (; e virgula decimal) ou "intl" (, e ponto decimal). */
     val csvStyle: String = "br",
+    /**
+     * Grupos das listas de especies que o projeto usa nas sugestoes de nome
+     * ("anfib,angio"); vazio = todos (v8). Codigos em [com.oikos.fieldbook.checklist.NameGroup].
+     */
+    @ColumnInfo(defaultValue = "")
+    val nameGroups: String = "",
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 )

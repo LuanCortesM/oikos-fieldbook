@@ -1,5 +1,7 @@
 ﻿package com.oikos.fieldbook
 
+import com.oikos.fieldbook.util.UiLanguage
+
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.DatePickerDialog
@@ -497,9 +499,12 @@ private fun OikosApp(
         }
     }
 
+    // As mensagens nascem em portugues no ViewModel; as fixas sao traduzidas aqui.
+    val portugueseUi = LocalOikosLanguage.current == OikosLanguage.Portuguese
+    fun inUiLanguage(text: String) = if (portugueseUi) text else englishUiText(text)
     LaunchedEffect(message) {
         message?.let {
-            snackbarHostState.showSnackbar(it)
+            snackbarHostState.showSnackbar(inUiLanguage(it))
             viewModel.clearMessage()
         }
     }
@@ -568,7 +573,7 @@ private fun OikosApp(
             is Screen.Export -> ExportScreen(viewModel, current.projectId, current.sessionId, screenModifier, onBack = {
                 screen = current.sessionId?.let { Screen.SessionDetail(current.projectId, it) } ?: Screen.ProjectDetail(current.projectId)
             }) { intent, warning ->
-                warning?.let { scope.launch { snackbarHostState.showSnackbar(it) } }
+                warning?.let { scope.launch { snackbarHostState.showSnackbar(inUiLanguage(it)) } }
                 context.startActivity(Intent.createChooser(intent, shareChooserTitle))
             }
             Screen.Settings -> SettingsScreen(viewModel, darkTheme, simpleMode, languageMode, onThemeChange, onSimpleModeChange, onLanguageModeChange, screenModifier, onChecklists = { screen = Screen.Checklists }, onTrash = { screen = Screen.Trash }) { screen = Screen.Projects }
@@ -781,7 +786,8 @@ private fun ProjectEditScreen(viewModel: AppViewModel, projectId: Long?, modifie
             form.load(
                 mapOf(
                     "datum" to "SIRGAS 2000", "coordFormat" to "DD", "photoQuality" to "medium", "audioFormat" to "wav",
-                    "enableFauna" to "true", "enableBotany" to "false", "enableFungi" to "false", "csvStyle" to "br"
+                    "enableFauna" to "true", "enableBotany" to "false", "enableFungi" to "false", "csvStyle" to "br",
+                    "nameGroups" to ""
                 )
             )
         } else {
@@ -793,7 +799,8 @@ private fun ProjectEditScreen(viewModel: AppViewModel, projectId: Long?, modifie
                     "photoQuality" to project.photoQuality, "audioFormat" to project.audioFormat,
                     "enableFauna" to project.enableFauna.toString(), "enableBotany" to project.enableBotany.toString(),
                     "enableFungi" to project.enableFungi.toString(), "license" to project.license,
-                    "mediaBaseUrl" to project.mediaBaseUrl, "csvStyle" to project.csvStyle
+                    "mediaBaseUrl" to project.mediaBaseUrl, "csvStyle" to project.csvStyle,
+                    "nameGroups" to project.nameGroups
                 )
             )
         }
@@ -869,7 +876,8 @@ private fun ProjectEditScreen(viewModel: AppViewModel, projectId: Long?, modifie
                         enableFungi = enableFungi,
                         license = form["license"],
                         mediaBaseUrl = mediaBaseUrl.trim(),
-                        csvStyle = form["csvStyle"].ifBlank { "br" }
+                        csvStyle = form["csvStyle"].ifBlank { "br" },
+                        nameGroups = form["nameGroups"]
                     ),
                     onFailed = { savingProject = false }
                 ) { savedId ->
@@ -893,7 +901,9 @@ private fun ProjectEditScreen(viewModel: AppViewModel, projectId: Long?, modifie
             TextInput("Responsáveis", pi, help = "Nome de quem responde pelos dados. Vai como autor e contato no eml.xml do Darwin Core Archive.") { pi = it }
             ChipRow("Datum padrão", listOf("SIRGAS 2000" to "SIRGAS 2000", "WGS84" to "WGS84"), form["datum"]) { form["datum"] = it }
             ChipRow("Formato de coordenadas", listOf("DD" to "Graus Decimais", "UTM" to "UTM", "DMS" to "DMS", "DMM" to "DMM"), form["coordFormat"]) { form["coordFormat"] = it }
-            ChipRow("Qualidade da foto", listOf("low" to "Baixa", "medium" to "Media", "high" to "Alta"), form["photoQuality"]) { form["photoQuality"] = it }
+            // "Média" ja e chave de outra traducao ("Average", da media de GPS).
+            val mediumQuality = if (LocalOikosLanguage.current == OikosLanguage.Portuguese) "Média" else "Medium"
+            ChipRow("Qualidade da foto", listOf("low" to "Baixa", "medium" to mediumQuality, "high" to "Alta"), form["photoQuality"]) { form["photoQuality"] = it }
             Text(ui("Publicação dos dados"), style = MaterialTheme.typography.titleMedium)
             ChipRow(
                 "Licença dos dados",
@@ -922,6 +932,41 @@ private fun ProjectEditScreen(viewModel: AppViewModel, projectId: Long?, modifie
             ProjectModuleFieldCard("Fauna", ui("Animais observados, capturados, ouvidos, vestígios e armadilhas fotográficas."), enableFauna, fields, openFieldGroup == "Fauna", onToggle = { form.setBool("enableFauna", it) }, onOpen = { openFieldGroup = if (openFieldGroup == "Fauna") null else "Fauna" }, onFieldChange = ::updateProjectField)
             ProjectModuleFieldCard("Botanica", ui("Flora, partes de plantas, flor, fruto, caule, folha e dados botânicos."), enableBotany, fields, openFieldGroup == "Botanica", onToggle = { form.setBool("enableBotany", it) }, onOpen = { openFieldGroup = if (openFieldGroup == "Botanica") null else "Botanica" }, onFieldChange = ::updateProjectField)
             ProjectModuleFieldCard("Fungos", ui("Funga, substrato, corpo de frutificação, associações e observações micológicas."), enableFungi, fields, openFieldGroup == "Fungos", onToggle = { form.setBool("enableFungi", it) }, onOpen = { openFieldGroup = if (openFieldGroup == "Fungos") null else "Fungos" }, onFieldChange = ::updateProjectField)
+            NameGroupSelector(form["nameGroups"]) { form["nameGroups"] = it }
+        }
+    }
+}
+
+/**
+ * Grupos das listas de especies que entram nas sugestoes de nome do projeto.
+ * Nenhum marcado = todos. [selection]: codigos separados por virgula.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun NameGroupSelector(selection: String, onChange: (String) -> Unit) {
+    val chosen = com.oikos.fieldbook.checklist.NameGroup.parseSelection(selection)
+    val portuguese = LocalOikosLanguage.current == OikosLanguage.Portuguese
+    fun toggle(group: com.oikos.fieldbook.checklist.NameGroup) {
+        val next = if (group.code in chosen) chosen - group.code else chosen + group.code
+        // Ordem fixa (a do enum) para o valor salvo nao mudar a toa.
+        onChange(com.oikos.fieldbook.checklist.NameGroup.entries.filter { it.code in next }.joinToString(",") { it.code })
+    }
+    Text(ui("Nomes sugeridos neste projeto"), style = MaterialTheme.typography.titleMedium)
+    Text(
+        ui("Escolha os grupos das listas de espécies que entram nas sugestões de nome. Sem nenhum marcado, valem todos."),
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    FilterChip(selected = chosen.isEmpty(), onClick = { onChange("") }, label = { Text(ui("Todos os grupos")) })
+    listOf(false to "Fauna", true to "Flora e Funga").forEach { (flora, title) ->
+        Text(ui(title), style = MaterialTheme.typography.labelLarge)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            com.oikos.fieldbook.checklist.NameGroup.entries.filter { it.flora == flora }.forEach { group ->
+                FilterChip(
+                    selected = group.code in chosen,
+                    onClick = { toggle(group) },
+                    label = { Text(if (portuguese) group.pt else group.en) }
+                )
+            }
         }
     }
 }
@@ -1239,7 +1284,7 @@ private fun SessionEditScreen(
                 val base = existing ?: SessionEntity(projectId = projectId, eventId = eventId, name = "")
                 val session = base.copy(
                     eventId = eventId.trim(),
-                    name = name.trim().ifBlank { "Expedição $date" },
+                    name = name.trim().ifBlank { if (project.isEnglishData()) "Expedition $date" else "Expedição $date" },
                     eventDate = date,
                     startTime = startTime,
                     endTime = endTime,
@@ -1546,13 +1591,13 @@ private fun SessionDetailScreen(
         modifier = modifier,
         topBar = {
             OikosTopBar(session?.name ?: "Expedição", onBack) {
-                IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, "Editar") }
-                IconButton(onClick = onMedia) { Icon(Icons.Default.Photo, "Mídias") }
-                IconButton(onClick = onExport) { Icon(Icons.Default.Share, "Exportar expedição") }
+                IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, ui("Editar")) }
+                IconButton(onClick = onMedia) { Icon(Icons.Default.Photo, ui("Mídias")) }
+                IconButton(onClick = onExport) { Icon(Icons.Default.Share, ui("Exportar expedição")) }
                 IconButton(onClick = { deleteSession = true }) { Icon(Icons.Default.Delete, ui("Apagar expedição")) }
             }
         },
-        floatingActionButton = { FloatingActionButton(onClick = onNewOccurrence) { Icon(Icons.Default.Add, "Nova ocorrência") } }
+        floatingActionButton = { FloatingActionButton(onClick = onNewOccurrence) { Icon(Icons.Default.Add, ui("Nova ocorrência")) } }
     ) { padding ->
         LazyColumn(contentPadding = padding.plus(PaddingValues(16.dp)), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item {
@@ -1657,8 +1702,8 @@ private fun SessionDetailScreen(
                     ) {
                         Row(verticalAlignment = Alignment.Top) {
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(occurrence.scientificName.ifBlank { "Ocorrência sem nome científico" }, style = MaterialTheme.typography.titleMedium)
-                                Text(listOf(occurrence.vernacularName, occurrence.recordedBy, dwcValueLabel(occurrence.occurrenceStatus)).filter { it.isNotBlank() }.joinToString(" - "))
+                                Text(occurrence.scientificName.ifBlank { ui("Ocorrência sem nome científico") }, style = MaterialTheme.typography.titleMedium)
+                                Text(listOf(occurrence.vernacularName, occurrence.recordedBy, dwcValueText(occurrence.occurrenceStatus)).filter { it.isNotBlank() }.joinToString(" - "))
                             }
                             IconButton(onClick = { occurrenceToDelete = occurrence }) {
                                 Icon(Icons.Default.Delete, ui("Apagar ocorrência"))
@@ -1796,10 +1841,12 @@ private fun TrackPanel(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                if (lastPoint != null) {
+                if (lastPoint == null) {
+                    ui("Ao iniciar, o app grava o ponto de saída e atualiza a linha automaticamente a cada poucos segundos.")
+                } else if (LocalOikosLanguage.current == OikosLanguage.Portuguese) {
                     "Último ponto: ${formatClock(lastPoint.timestamp)} - precisão ${lastPoint.accuracy?.let { "±${it.toInt()} m" } ?: "não informada"}. Atualização automática aproximada: ${profile.intervalMillis / 1000} s ou ${formatPlain(profile.minDistanceMeters.toDouble()).replace('.', ',')} m."
                 } else {
-                    "Ao iniciar, o app grava o ponto de saída e atualiza a linha automaticamente a cada poucos segundos."
+                    "Last point: ${formatClock(lastPoint.timestamp)} - accuracy ${lastPoint.accuracy?.let { "±${it.toInt()} m" } ?: "not reported"}. Automatic update about every ${profile.intervalMillis / 1000} s or ${formatPlain(profile.minDistanceMeters.toDouble())} m."
                 },
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1823,6 +1870,7 @@ private fun TrackMapPreview(
     val offlineMap = LocalOfflineMap.current
     val occurrencePoints = occurrences.filter { it.latitude != null && it.longitude != null }
     val userArrow = remember(context) { oikosUserMarkerDrawable(context) }
+    val youAreHere = ui("Você está aqui")
     // Um alfinete por grupo (fauna, flora, fungos), desenhado uma vez so.
     val recordPins = remember(context) { mutableMapOf<MapIconGroup, android.graphics.drawable.Drawable>() }
     var mapViewRef by remember { mutableStateOf<MapView?>(null) }
@@ -1923,7 +1971,7 @@ private fun TrackMapPreview(
                     }
                 } else {
                     val marker = layers.user ?: Marker(mapView).apply {
-                        title = "Você está aqui"
+                        title = youAreHere
                         icon = userArrow
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                     }.also {
@@ -2281,8 +2329,16 @@ private fun MapView.frameData(points: List<GeoPoint>, fallback: GeoPoint) {
         controller.setCenter(distinct.firstOrNull() ?: fallback)
         return
     }
-    val box = org.osmdroid.util.BoundingBox.fromGeoPointsSafe(distinct)
-    val border = (48 * resources.displayMetrics.density).toInt()
+    val dataBox = org.osmdroid.util.BoundingBox.fromGeoPointsSafe(distinct)
+    // O alfinete sobe a partir do ponto: folga extra no norte para o de cima
+    // nao ficar cortado nem embaixo da bussola, no canto superior.
+    val box = org.osmdroid.util.BoundingBox(
+        (dataBox.latNorth + dataBox.latitudeSpan * 0.25).coerceAtMost(85.0),
+        dataBox.lonEast,
+        dataBox.latSouth,
+        dataBox.lonWest
+    )
+    val border = (56 * resources.displayMetrics.density).toInt()
     // Pontos muito proximos pediriam zoom alem do que os tiles tem: no maximo 18.
     val apply = { zoomToBoundingBox(box, false, border, 18.0, null) }
     if (isLayoutOccurred) apply() else addOnFirstLayoutListener { _, _, _, _, _ -> apply() }
@@ -2507,6 +2563,7 @@ private fun OccurrenceEditScreen(
     // Um toque duplo salvava duas vezes (ou um registro vazio no meio da troca de rascunho).
     var saving by remember { mutableStateOf(false) }
     var locationInputError by remember { mutableStateOf<String?>(null) }
+    val portugueseUi = LocalOikosLanguage.current == OikosLanguage.Portuguese
     fun save(andNew: Boolean) {
                 if (saving || !form.initialized) return
                 if (viewModel.recording.value?.target?.draftKey == draftKey) {
@@ -2564,7 +2621,15 @@ private fun OccurrenceEditScreen(
                 )
                 if (faltando.isNotEmpty()) {
                     if (faltando.any { it.dwcTerm !in fixedOccurrenceTerms }) showAdvanced = true
-                    viewModel.showMessage("Preencha antes de salvar: " + faltando.joinToString(", ") { it.labelPt })
+                    viewModel.showMessage(
+                        if (portugueseUi) {
+                            "Preencha antes de salvar: " + faltando.joinToString(", ") { it.labelPt }
+                        } else {
+                            "Fill in before saving: " + faltando.joinToString(", ") { field ->
+                                field.labelEn.ifBlank { englishUiText(prettyPortugueseText(field.labelPt)) }
+                            }
+                        }
+                    )
                 } else {
                     val pending = form.pendingMedia
                     saving = true
@@ -2650,6 +2715,7 @@ private fun OccurrenceEditScreen(
             if (enabled("scientificName", enabledFields)) ScientificNameField(
                 viewModel = viewModel,
                 label = label("scientificName", enabledFields, "Nome da espécie"),
+                groups = com.oikos.fieldbook.checklist.NameGroup.parseSelection(project?.nameGroups.orEmpty()),
                 value = scientificName,
                 authorship = dynamicValues["scientificNameAuthorship"],
                 onValueChange = {
@@ -2702,7 +2768,9 @@ private fun OccurrenceEditScreen(
             ) { lifeStage = it }
             if (enabled("behavior", enabledFields)) TextInput(label("behavior", enabledFields, "Comportamento"), behavior) { behavior = it }
             if (enabled("reproductiveCondition", enabledFields)) TextInput(label("reproductiveCondition", enabledFields, "Condição reprodutiva"), reproductive) { reproductive = it }
-            if (enabled("recordedBy", enabledFields)) TextInput(label("recordedBy", enabledFields, "Quem coletou"), recordedBy, help = if (recordedBy.isBlank() && !session?.recordedBy.isNullOrBlank()) "Em branco, a exportação usa o coletor da expedição: ${session?.recordedBy}." else null) { recordedBy = it }
+            if (enabled("recordedBy", enabledFields)) TextInput(label("recordedBy", enabledFields, "Quem coletou"), recordedBy, help = if (recordedBy.isBlank() && !session?.recordedBy.isNullOrBlank()) {
+                if (portugueseUi) "Em branco, a exportação usa o coletor da expedição: ${session?.recordedBy}." else "If blank, the export uses the expedition collector: ${session?.recordedBy}."
+            } else null) { recordedBy = it }
             if (enabled("identifiedBy", enabledFields)) TextInput(label("identifiedBy", enabledFields, "Quem identificou"), identifiedBy) { identifiedBy = it }
             if (enabled("dateIdentified", enabledFields)) DateInput(label("dateIdentified", enabledFields, "Data da identificação"), dateIdentified) { dateIdentified = it }
             var showGps by rememberSaveable { mutableStateOf(false) }
@@ -2717,15 +2785,13 @@ private fun OccurrenceEditScreen(
                     // Altitude do GPS ja convertida para o nivel do mar pelo EGM2008.
                     dynamicValues["verticalDatum"] = if (fix.altitude != null) Geoid.VERTICAL_DATUM else ""
                     dynamicValues["georeferenceProtocol"] = GpsAveraging.GBIF_PROTOCOL
-                    dynamicValues["georeferenceRemarks"] = fix.remarks()
+                    dynamicValues["georeferenceRemarks"] = fix.remarks(english = project.isEnglishData())
                 }
             }
             // Coordenada digitada a mao invalida a descricao automatica de como
             // ela foi obtida; o protocolo e a observacao saem do registro.
             fun manualCoordinateEdit() {
-                if (dynamicValues["georeferenceRemarks"].startsWith(GPS_REMARKS_PREFIX) ||
-                    dynamicValues["georeferenceRemarks"].startsWith(SINGLE_FIX_REMARKS_PREFIX)
-                ) {
+                if (isAutomaticGpsRemarks(dynamicValues["georeferenceRemarks"])) {
                     dynamicValues["georeferenceRemarks"] = ""
                     dynamicValues["georeferenceProtocol"] = ""
                 }
@@ -2752,8 +2818,7 @@ private fun OccurrenceEditScreen(
                             accuracy = formatPlain(GpsAveraging.uncertaintyFor(it.accuracyMeters))
                             dynamicValues["verticalDatum"] = if (it.altitude != null) Geoid.VERTICAL_DATUM else ""
                             dynamicValues["georeferenceProtocol"] = GpsAveraging.GBIF_PROTOCOL
-                            dynamicValues["georeferenceRemarks"] =
-                                "$SINGLE_FIX_REMARKS_PREFIX; precisão informada ${it.accuracyMeters?.let { a -> formatPlain(a) + " m" } ?: "não informada"}; incerteza = 2 × precisão."
+                            dynamicValues["georeferenceRemarks"] = singleFixRemarks(it.accuracyMeters, project.isEnglishData())
                         }
                     }
                 }
@@ -2795,8 +2860,19 @@ private fun OccurrenceEditScreen(
     }
 }
 
-private const val GPS_REMARKS_PREFIX = "Média de"
-private const val SINGLE_FIX_REMARKS_PREFIX = "Leitura única do GNSS do celular"
+/** Inicios das observacoes de georreferenciamento que o app escreve (pt e en). */
+private val AUTOMATIC_GPS_REMARKS = listOf("Média de", "Leitura única do GNSS do celular", "Mean of", "Single phone GNSS reading")
+
+private fun isAutomaticGpsRemarks(text: String): Boolean = AUTOMATIC_GPS_REMARKS.any { text.startsWith(it) }
+
+/** Dado gravado no registro: segue o idioma do projeto, nao o da tela. */
+private fun ProjectEntity?.isEnglishData(): Boolean = this?.language?.startsWith("en", ignoreCase = true) == true
+
+private fun singleFixRemarks(accuracyMeters: Double?, english: Boolean): String {
+    val accuracy = accuracyMeters?.let { formatPlain(it) + " m" }
+    return if (english) "Single phone GNSS reading; reported accuracy ${accuracy ?: "not reported"}; uncertainty = 2 × accuracy."
+    else "Leitura única do GNSS do celular; precisão informada ${accuracy ?: "não informada"}; incerteza = 2 × precisão."
+}
 
 private fun hasAnyLocationPermission(context: Context): Boolean =
     hasPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ||
@@ -2999,6 +3075,10 @@ private fun ExportScreen(viewModel: AppViewModel, projectId: Long, sessionId: Lo
     var selectedContent by rememberSaveable { mutableStateOf(ExportContent.SpreadsheetsAndAllMedia) }
     var selectedFormat by rememberSaveable { mutableStateOf(ExportFormat.Zip) }
     val exporting by viewModel.exporting.collectAsState()
+    val exportProject by remember(viewModel, projectId) { viewModel.observeProject(projectId) }.collectAsState(initial = null)
+    // Pastas do ZIP no idioma do projeto; o texto, no idioma da tela.
+    val paths = com.oikos.fieldbook.export.ExportPaths.of(exportProject?.language ?: "pt")
+    val portugueseUi = LocalOikosLanguage.current == OikosLanguage.Portuguese
     Scaffold(modifier = modifier, topBar = { OikosTopBar(if (sessionId == null) "Exportar projeto" else "Exportar expedição", onBack) }) { padding ->
         Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(ui("Exportar dados"), style = MaterialTheme.typography.titleLarge)
@@ -3006,9 +3086,20 @@ private fun ExportScreen(viewModel: AppViewModel, projectId: Long, sessionId: Lo
             Text(ui("Para não perder o vínculo entre fotos, áudios e registros, recomendamos exportar como ZIP completo."))
             HelpCard(
                 "ZIP organizado",
-                "O ZIP cria 01_planilha_principal, 02_tabelas_de_apoio, 03_sig_qgis, 04_darwin_core_archive e 05_midias. A planilha principal reúne as ocorrências do escopo escolhido com os campos Darwin Core e os campos configurados no projeto."
+                if (portugueseUi) {
+                    "O ZIP cria ${paths.main}, ${paths.support}, ${paths.gis}, ${paths.dwca} e ${paths.media}. A planilha principal reúne as ocorrências do escopo escolhido com os campos Darwin Core e os campos configurados no projeto."
+                } else {
+                    "The ZIP creates ${paths.main}, ${paths.support}, ${paths.gis}, ${paths.dwca} and ${paths.media}. The main spreadsheet gathers the occurrences in the chosen scope with the Darwin Core fields and the fields configured in the project."
+                }
             )
-            HelpCard("Trilhas GPS", "O ZIP completo inclui trilha_gps_pontos.csv e o GeoJSON inclui a trilha da expedição como LineString. No QGIS, estilize featureType=expeditionTrack em laranja para ver o percurso.")
+            HelpCard(
+                "Trilhas GPS",
+                if (portugueseUi) {
+                    "O ZIP completo inclui ${paths.trackCsv} e o GeoJSON inclui a trilha da expedição como LineString. No QGIS, estilize featureType=expeditionTrack em laranja para ver o percurso."
+                } else {
+                    "The full ZIP includes ${paths.trackCsv}, and the GeoJSON includes the expedition track as a LineString. In QGIS, style featureType=expeditionTrack in orange to see the route."
+                }
+            )
             Text(ui("Conteúdo"), style = MaterialTheme.typography.titleMedium)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ExportContent.entries.forEach { content ->
@@ -3953,7 +4044,7 @@ private fun ChecklistsScreen(viewModel: AppViewModel, modifier: Modifier, onBack
             item {
                 HelpCard(
                     "Listas de espécies",
-                    "Baixe uma vez com internet e use em campo sem rede: o nome é sugerido enquanto você digita e sinônimos viram o nome aceito."
+                    "As listas oficiais do Brasil já vêm no app e funcionam sem internet: o nome é sugerido enquanto você digita, sinônimos viram o nome aceito e a distribuição por estado aparece junto. Com internet, dá para atualizar."
                 )
             }
             items(ChecklistSources.all, key = { it.key }) { source ->
@@ -3963,6 +4054,7 @@ private fun ChecklistsScreen(viewModel: AppViewModel, modifier: Modifier, onBack
                     progress = progress[source.key],
                     latestVersion = latest[source.key],
                     onDownload = { viewModel.downloadChecklist(source) },
+                    onInstallEmbedded = { viewModel.installEmbeddedChecklist(source) },
                     onRemove = { toRemove = it }
                 )
             }
@@ -4003,8 +4095,10 @@ private fun ChecklistSourceCard(
     progress: AppViewModel.BackupProgress?,
     latestVersion: RemoteVersion?,
     onDownload: () -> Unit,
+    onInstallEmbedded: () -> Unit,
     onRemove: (ChecklistEntity) -> Unit
 ) {
+    val embedded = source.embeddedAsset != null
     val updateAvailable = installed != null && latestVersion?.isNewerThan(installed) == true
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -4012,9 +4106,17 @@ private fun ChecklistSourceCard(
             Text(ui(source.scope), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             Text(ui(source.description), color = MaterialTheme.colorScheme.onSurfaceVariant)
             when {
+                installed == null && embedded -> Text("${ui("Não instalada")} · ${ui("vem no app, sem internet")} · ${ui("ocupa")} ~${source.approxInstalledMb} MB ${ui("no aparelho")}", style = MaterialTheme.typography.labelMedium)
                 installed == null -> Text("${ui("Não instalada")} · ${ui("cerca de")} ${source.approxDownloadMb} MB ${ui("para baixar")} · ${ui("ocupa")} ~${source.approxInstalledMb} MB ${ui("no aparelho")}", style = MaterialTheme.typography.labelMedium)
                 updateAvailable -> Text("${installedSummary(installed)}\n${ui("Versão nova disponível")}: ${latestVersion?.label}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
                 else -> Text(installedSummary(installed), style = MaterialTheme.typography.labelMedium)
+            }
+            if (installed != null && installed.sourceUrl == com.oikos.fieldbook.checklist.ChecklistService.EMBEDDED_URL) {
+                Text(
+                    ui("Cópia que vem no app. Com internet, toque em Atualizar pela internet para ter a versão mais recente."),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             if (installed != null && ChecklistSources.isMirror(installed.sourceUrl)) {
                 Text(
@@ -4031,9 +4133,13 @@ private fun ChecklistSourceCard(
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     when {
+                        installed == null && embedded -> {
+                            Button(onClick = onInstallEmbedded) { Text(ui("Instalar")) }
+                            OutlinedButton(onClick = onDownload) { Text(ui("Baixar")) }
+                        }
                         installed == null -> Button(onClick = onDownload) { Text(ui("Baixar")) }
                         updateAvailable -> Button(onClick = onDownload) { Text(ui("Atualizar")) }
-                        else -> OutlinedButton(onClick = onDownload) { Text(ui("Baixar de novo")) }
+                        else -> OutlinedButton(onClick = onDownload) { Text(ui("Atualizar pela internet")) }
                     }
                     if (installed != null) TextButton(onClick = { onRemove(installed) }) { Text(ui("Remover")) }
                 }
@@ -4206,7 +4312,7 @@ private fun TallyScreen(
             form["alt"] = fix.altitude?.let { formatPlain(it) }.orEmpty()
             form["accuracy"] = formatPlain(fix.uncertainty)
             form["protocol"] = GpsAveraging.GBIF_PROTOCOL
-            form["georemarks"] = fix.remarks()
+            form["georemarks"] = fix.remarks(english = project.isEnglishData())
         }
     }
 
@@ -4265,7 +4371,7 @@ private fun TallyScreen(
                                     form["alt"] = it.altitude?.let { value -> formatPlain(value) }.orEmpty()
                                     form["accuracy"] = formatPlain(GpsAveraging.uncertaintyFor(it.accuracyMeters))
                                     form["protocol"] = GpsAveraging.GBIF_PROTOCOL
-                                    form["georemarks"] = "$SINGLE_FIX_REMARKS_PREFIX; precisão informada ${it.accuracyMeters?.let { a -> formatPlain(a) + " m" } ?: "não informada"}; incerteza = 2 × precisão."
+                                    form["georemarks"] = singleFixRemarks(it.accuracyMeters, project.isEnglishData())
                                 }
                             }
                         }
@@ -4279,6 +4385,7 @@ private fun TallyScreen(
             ScientificNameField(
                 viewModel = viewModel,
                 label = "Adicionar espécie",
+                groups = com.oikos.fieldbook.checklist.NameGroup.parseSelection(project?.nameGroups.orEmpty()),
                 value = query,
                 authorship = "",
                 onValueChange = { query = it },
@@ -4475,6 +4582,8 @@ private fun RepeatFieldsDialog(
 private fun ScientificNameField(
     viewModel: AppViewModel,
     label: String,
+    /** Grupos escolhidos no projeto; vazio = todos. */
+    groups: Set<String> = emptySet(),
     value: String,
     authorship: String,
     onValueChange: (String) -> Unit,
@@ -4499,7 +4608,7 @@ private fun ScientificNameField(
             suggestions = emptyList()
         } else {
             delay(220)
-            suggestions = if (value.trim().length >= 2) viewModel.searchNames(value) else emptyList()
+            suggestions = if (value.trim().length >= 2) viewModel.searchNames(value, groups) else emptyList()
         }
         known = if (value.isBlank()) null else viewModel.checkName(value, authorship)
     }
@@ -4546,10 +4655,17 @@ private fun ScientificNameField(
                             val details = listOfNotNull(
                                 suggestion.matchedVernacular?.let { "\"$it\"" },
                                 taxon.family.takeIf { it.isNotBlank() },
-                                dwcValueLabel(taxon.rank).takeIf { it.isNotBlank() }?.let { ui(it) },
+                                dwcValueText(taxon.rank).takeIf { it.isNotBlank() },
                                 suggestion.checklistTitle
                             ).joinToString(" · ")
                             Text(details, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            suggestion.distribution?.toDistribution()?.let { distribution ->
+                                Text(
+                                    distributionSummary(distribution),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
                             if (taxon.status == "S") {
                                 Text(
                                     "${ui("Sinônimo de")} ${taxon.acceptedName.ifBlank { "?" }}",
@@ -4577,7 +4693,48 @@ private fun ScientificNameField(
             )
             else -> Text(ui("Nome confere com a lista instalada."), style = MaterialTheme.typography.labelMedium, color = Color(0xFF2E7D32))
         }
+        if (!focused && check?.distribution != null) {
+            Text(
+                "${ui("Distribuição na lista")}: ${distributionSummary(check.distribution)}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
+}
+
+/**
+ * Resumo da distribuicao segundo a lista: origem, endemismo, dominios e estados.
+ * Ex.: "Endêmica do Brasil · Mata Atlântica · BA, ES, RJ"; "Nativa · 12 estados".
+ */
+@Composable
+private fun distributionSummary(d: com.oikos.fieldbook.checklist.TaxonDistribution): String {
+    val pt = LocalOikosLanguage.current == OikosLanguage.Portuguese
+    val origin = d.establishment.mapNotNull { code ->
+        when (code) {
+            "native" -> if (pt) "Nativa" else "Native"
+            "introduced" -> if (pt) "Introduzida" else "Introduced"
+            "cultivated" -> if (pt) "Cultivada" else "Cultivated"
+            "naturalized" -> if (pt) "Naturalizada" else "Naturalized"
+            "uncertain" -> if (pt) "Origem incerta" else "Uncertain origin"
+            else -> null
+        }
+    }.joinToString(", ")
+    val endemic = if (d.endemic == true) (if (pt) "Endêmica do Brasil" else "Endemic to Brazil") else ""
+    val domains = d.domains.joinToString(", ") { domain ->
+        if (pt) domain else when (domain) {
+            "Amazônia" -> "Amazon"
+            "Mata Atlântica" -> "Atlantic Forest"
+            else -> domain
+        }
+    }
+    val states = when {
+        d.states.isEmpty() -> ""
+        d.states.size >= 27 -> if (pt) "todos os estados" else "all states"
+        d.states.size > 8 -> if (pt) "${d.states.size} estados" else "${d.states.size} states"
+        else -> d.states.joinToString(", ")
+    }
+    return listOf(endemic.ifBlank { origin }, domains, states).filter { it.isNotBlank() }.joinToString(" · ")
 }
 
 /**
@@ -4869,8 +5026,10 @@ private fun BackupCard(viewModel: AppViewModel) {
             text = {
                 Text(
                     "${ui("Feito em")} ${formatBackupDate(manifest.createdAt)} (${ui("versão")} ${manifest.appVersion}): " +
-                        "${manifest.projects} ${ui("projeto(s)")}, ${manifest.occurrences} ${ui("ocorrência(s)")}, " +
-                        "${manifest.mediaFiles} ${ui("mídia(s)")} (${humanSize(manifest.mediaBytes)}).\n\n" +
+                        UiLanguage.count(manifest.projects, "projeto", "projetos", "project", "projects") + ", " +
+                        UiLanguage.count(manifest.occurrences, "ocorrência", "ocorrências", "occurrence", "occurrences") + ", " +
+                        UiLanguage.count(manifest.mediaFiles, "mídia", "mídias", "media file", "media files") +
+                        " (${humanSize(manifest.mediaBytes)}).\n\n" +
                         ui("Todos os dados atuais deste aparelho serão substituídos pelos do backup. O app vai fechar e abrir de novo para concluir.") +
                         "\n\n" + ui("As listas de espécies já instaladas neste aparelho são mantidas.")
                 )
@@ -5003,7 +5162,7 @@ private fun AboutScreen(modifier: Modifier, onBack: () -> Unit) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(ui("Créditos"), style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "Produto científico desenvolvido por Luan da Silva Cortes Maciel (Maciel, L. S. C.), mestrando no Instituto de Pesquisa Jardim Botânico do Rio de Janeiro, sob orientação de Leandro Freitas e coorientação de Matheus de Toledo Moroti.",
+                        ui("Produto científico desenvolvido por Luan da Silva Cortes Maciel (Maciel, L. S. C.), mestrando no Instituto de Pesquisa Jardim Botânico do Rio de Janeiro, sob orientação de Leandro Freitas e coorientação de Matheus de Toledo Moroti."),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(ui("Aplicativo vinculado à pesquisa:"), style = MaterialTheme.typography.labelLarge)
@@ -5326,7 +5485,7 @@ private val englishText = mapOf(
     "Registrar trilha da expedição" to "Record expedition track",
     "Salva o percurso geral da expedição para exportar como LineString." to "Saves the expedition route for export as a LineString.",
     "Observações gerais" to "General notes",
-    "Expedição é uma saída de campo, dia de coleta ou campanha. Internamente, ela é exportada como Darwin Core Event." to "An expedition is a field trip, sampling day or campaign. Internally, it is exported as a Darwin Core Event.",
+    "Expedição é uma saída de campo, dia de coleta ou campanha. Internamente ela continua como Darwin Core Event." to "An expedition is a field trip, sampling day or campaign. Internally it is still a Darwin Core Event.",
     "Expedição" to "Expedition",
     "Mídias" to "Media",
     "Exportar expedição" to "Export expedition",
@@ -5371,7 +5530,7 @@ private val englishText = mapOf(
     "Data do registro" to "Record date",
     "Hora do registro" to "Record time",
     "Registro científico" to "Scientific record",
-    "Identificador Darwin Core occurrenceID. Ele é gerado automaticamente e pode ficar oculto no uso comum." to "Darwin Core occurrenceID. It is generated automatically and can stay hidden during normal use.",
+    "Identificador Darwin Core occurrenceID. É gerado automaticamente; edite apenas se precisar casar com um identificador externo." to "Darwin Core occurrenceID. It is generated automatically; edit it only if it must match an external identifier.",
     "Registro de campo" to "Field record",
     "Código amigável do ponto ou registro. Exemplo: P03, T1-P03 ou Registro #0003." to "Friendly point or record code. Example: P03, T1-P03 or Record #0003.",
     "Nome da espécie" to "Species name",
@@ -5434,7 +5593,7 @@ private val englishText = mapOf(
     "Escopo: Expedição atual" to "Scope: current expedition",
     "Para não perder o vínculo entre fotos, áudios e registros, recomendamos exportar como ZIP completo." to "To keep links between photos, audio and records, we recommend exporting as a complete ZIP.",
     "ZIP organizado" to "Organized ZIP",
-    "O ZIP cria 01_planilha_principal, 02_tabelas_de_apoio, 03_sig_qgis e 04_midias. A planilha principal reúne as ocorrências do escopo escolhido com os campos Darwin Core e os campos configurados no projeto." to "The ZIP creates 01_planilha_principal, 02_tabelas_de_apoio, 03_sig_qgis and 04_midias. The main spreadsheet gathers occurrences from the selected scope with Darwin Core fields and the fields configured in the project.",
+    "O ZIP cria 01_planilha_principal, 02_tabelas_de_apoio, 03_sig_qgis, 04_darwin_core_archive e 05_midias. A planilha principal reúne as ocorrências do escopo escolhido com os campos Darwin Core e os campos configurados no projeto." to "The ZIP creates 01_planilha_principal, 02_tabelas_de_apoio, 03_sig_qgis, 04_darwin_core_archive and 05_midias. The main spreadsheet gathers occurrences from the selected scope with Darwin Core fields and the fields configured in the project.",
     "Trilhas GPS" to "GPS tracks",
     "O ZIP completo inclui trilha_gps_pontos.csv e o GeoJSON inclui a trilha da expedição como LineString. No QGIS, estilize featureType=expeditionTrack em laranja para ver o percurso." to "The complete ZIP includes trilha_gps_pontos.csv and the GeoJSON includes the expedition track as a LineString. In QGIS, style featureType=expeditionTrack in orange to see the route.",
     "Conteúdo" to "Content",
@@ -5777,7 +5936,94 @@ private val englishText = mapOf(
     "OpenStreetMap (internet)" to "OpenStreetMap (internet)",
     "Precisa de internet." to "Needs internet.",
     "zoom" to "zoom",
-    "Importar mapa (.mbtiles)" to "Import map (.mbtiles)"
+    "Importar mapa (.mbtiles)" to "Import map (.mbtiles)",
+    // Telas
+    "Completo" to "Complete",
+    "Incompleto" to "Incomplete",
+    "Sem GPS" to "No GPS",
+    "Ao iniciar, o app grava o ponto de saída e atualiza a linha automaticamente a cada poucos segundos." to "When started, the app records the starting point and updates the line automatically every few seconds.",
+    "Você está aqui" to "You are here",
+    "Define se o registro é uma observação, um espécime tombado ou uma amostra. Exportado como dwc:basisOfRecord." to "Says whether the record is an observation, a preserved specimen or a sample. Exported as dwc:basisOfRecord.",
+    "Pacote com meta.xml e eml.xml, no formato que o IPT, o GBIF e o SiBBr importam sem retrabalho. Campos próprios do Oikos saem como MeasurementOrFact. As mídias entram como Simple Multimedia quando o projeto tem URL pública das mídias. Licença, autor e URL ficam em Editar projeto." to "Package with meta.xml and eml.xml, in the format that IPT, GBIF and SiBBr import without rework. Oikos's own fields go out as MeasurementOrFact. Media go in as Simple Multimedia when the project has a public media URL. License, author and URL are in Edit project.",
+    "Sai na exportação exatamente como digitado." to "Exported exactly as typed.",
+    "Produto científico desenvolvido por Luan da Silva Cortes Maciel (Maciel, L. S. C.), mestrando no Instituto de Pesquisa Jardim Botânico do Rio de Janeiro, sob orientação de Leandro Freitas e coorientação de Matheus de Toledo Moroti." to "Scientific product developed by Luan da Silva Cortes Maciel (Maciel, L. S. C.), master's student at the Rio de Janeiro Botanical Garden Research Institute, supervised by Leandro Freitas and co-supervised by Matheus de Toledo Moroti.",
+    "Taxonomia" to "Taxonomy",
+    "Amostragem" to "Sampling",
+    "Ambiente" to "Environment",
+    "Vestígios" to "Traces",
+    "Coleção" to "Collection",
+    "Ecologia" to "Ecology",
+    "Georreferenciamento" to "Georeferencing",
+    "Autoria" to "Authorship",
+    "Fungo" to "Fungus",
+    "Condições ambientais" to "Environmental conditions",
+    "Observações ecológicas" to "Ecological observations",
+    "Método de coleta" to "Collection method",
+    "Anotações rápidas" to "Quick notes",
+    "Dúvidas de identificação" to "Identification doubts",
+    "Hipótese de identificação" to "Identification hypothesis",
+    "Epíteto específico" to "Specific epithet",
+    "Datum geodésico" to "Geodetic datum",
+    // Mensagens (snackbar)
+    "Gravação encerrada e salva: o app saiu da tela." to "Recording stopped and saved: the app left the screen.",
+    "Sem permissão de localização. Ative em Configurações do Android > Apps > Oikos FieldBook > Permissões." to "No location permission. Turn it on in Android Settings > Apps > Oikos FieldBook > Permissions.",
+    "Tamanho da unidade amostral precisa ser um número." to "Sampling unit size must be a number.",
+    "A coordenada não é um número em graus decimais. Confira antes de salvar (ex.: -22.43017)." to "The coordinate is not a number in decimal degrees. Check it before saving (e.g. -22.43017).",
+    "Preencha latitude e longitude, ou deixe as duas em branco." to "Fill in both latitude and longitude, or leave both blank.",
+    "A altitude precisa ser só o número, em metros (ex.: 1520)." to "Altitude must be just the number, in meters (e.g. 1520).",
+    "A incerteza precisa ser só o número, em metros (ex.: 15)." to "Uncertainty must be just the number, in meters (e.g. 15).",
+    "Pare a gravação antes de salvar o registro." to "Stop the recording before saving the record.",
+    "Aguarde: uma foto ou um áudio ainda está sendo processado." to "Please wait: a photo or audio is still being processed.",
+    "Número de indivíduos precisa ser um número inteiro." to "Number of individuals must be a whole number.",
+    "Registro salvo. Pronto para o próximo." to "Record saved. Ready for the next one.",
+    "Gravação salva ao sair da tela." to "Recording saved when leaving the screen.",
+    "Nenhum app de câmera disponível." to "No camera app available.",
+    "Temperatura do ar: digite só o número em °C (por exemplo 22,5)." to "Air temperature: type just the number in °C (for example 22.5).",
+    "Umidade: digite um número de 0 a 100." to "Humidity: type a number from 0 to 100.",
+    "Distância: digite só o número em metros." to "Distance: type just the number in meters.",
+    "Cache já estava limpo." to "Cache was already clean.",
+    "Cache do mapa já estava vazio." to "Map cache was already empty.",
+    "Backup restaurado. Confira projetos, expedições e mídias." to "Backup restored. Check projects, expeditions and media.",
+    "Este arquivo não é um backup do Oikos FieldBook." to "This file is not an Oikos FieldBook backup.",
+    "Sem espaço no aparelho: nada foi salvo. Libere espaço e toque em Salvar de novo; o que você digitou continua na tela." to "No space left on the device: nothing was saved. Free up space and tap Save again; what you typed is still on screen.",
+    "Já existe um projeto igual." to "An identical project already exists.",
+    "Configuração de campos salva." to "Field settings saved.",
+    "Aviso: expedição salva sem data de coleta." to "Warning: expedition saved without a collection date.",
+    "eventID já existe. Use um identificador único." to "eventID already exists. Use a unique identifier.",
+    "Lixeira esvaziada." to "Trash emptied.",
+    "Aviso: registro salvo sem coordenadas." to "Warning: record saved without coordinates.",
+    "Aviso: registro salvo sem o nome da espécie." to "Warning: record saved without the species name.",
+    "occurrenceID já existe. Use um identificador único." to "occurrenceID already exists. Use a unique identifier.",
+    "Mídia atualizada." to "Media updated.",
+    "A câmera não entregou a foto. Tente de novo." to "The camera did not return the photo. Try again.",
+    "Já existe uma gravação em andamento." to "A recording is already in progress.",
+    "Aguarde: a gravação anterior ainda está sendo salva." to "Please wait: the previous recording is still being saved.",
+    "Áudio salvo." to "Audio saved.",
+    "Ponto da trilha salvo." to "Track point saved.",
+    "Ponto ignorado: precisão baixa ou deslocamento insuficiente." to "Point skipped: low accuracy or too little movement.",
+    "Permita o acesso à localização para gravar a trilha." to "Allow location access to record the track.",
+    "Trilha GPS iniciada. A linha será atualizada em tempo real." to "GPS track started. The line will update in real time.",
+    "Trilha GPS encerrada." to "GPS track stopped.",
+    "Uma trilha GPS que estava aberta foi encerrada no último ponto gravado." to "A GPS track that was left open was closed at its last recorded point.",
+    "Trilha GPS retomada após o app ter sido fechado." to "GPS track resumed after the app was closed.",
+    "Não foi possível importar: a trilha precisa ter pelo menos 2 pontos válidos." to "Could not import: the track needs at least 2 valid points.",
+    "Não foi possível iniciar a trilha em segundo plano." to "Could not start the track in the background.",
+    "Sem posição de GPS agora. Tente em local mais aberto ou digite a coordenada." to "No GPS position right now. Try a more open spot or type the coordinate.",
+    "Nenhum espécime neste escopo. As etiquetas saem para registros com natureza do registro PreservedSpecimen, MaterialSample ou LivingSpecimen." to "No specimens in this scope. Labels are made for records whose basis of record is PreservedSpecimen, MaterialSample or LivingSpecimen.",
+    "Importando o pacote..." to "Importing the package...",
+    "Latitude deve estar entre -90 e 90." to "Latitude must be between -90 and 90.",
+    "Longitude deve estar entre -180 e 180." to "Longitude must be between -180 and 180.",
+    // Listas de especies que vem no app e grupos do projeto
+    "Instalar" to "Install",
+    "vem no app, sem internet" to "comes with the app, no internet needed",
+    "Atualizar pela internet" to "Update from the internet",
+    "Cópia que vem no app. Com internet, toque em Atualizar pela internet para ter a versão mais recente." to "Copy that comes with the app. With internet, tap Update from the internet to get the latest version.",
+    "As listas oficiais do Brasil já vêm no app e funcionam sem internet: o nome é sugerido enquanto você digita, sinônimos viram o nome aceito e a distribuição por estado aparece junto. Com internet, dá para atualizar." to "Brazil's official species lists come with the app and work offline: the name is suggested as you type, synonyms become the accepted name and the distribution by state shows alongside. With internet, you can update them.",
+    "Nomes sugeridos neste projeto" to "Names suggested in this project",
+    "Escolha os grupos das listas de espécies que entram nas sugestões de nome. Sem nenhum marcado, valem todos." to "Choose the species list groups used for name suggestions. With none selected, all groups are used.",
+    "Todos os grupos" to "All groups",
+    "Flora e Funga" to "Flora and Fungi",
+    "Distribuição na lista" to "Distribution in the list"
 )
 
 @Composable
@@ -6291,7 +6537,7 @@ private fun DwcVocabularyInput(
                         freeText = false
                         onChange(option)
                     },
-                    label = { Text(dwcValueLabel(option)) }
+                    label = { Text(dwcValueText(option)) }
                 )
             }
             FilterChip(
@@ -6420,6 +6666,15 @@ private fun dwcValueLabel(value: String): String = when (value) {
     "trapNight" -> "armadilha-noite"
     "individual" -> "indivíduo"
     else -> value
+}
+
+/** Valor de vocabulario na lingua da tela; em ingles, o proprio termo em palavras ("notAType" -> "Not a type"). */
+@Composable
+private fun dwcValueText(value: String): String {
+    val portuguese = dwcValueLabel(value)
+    if (LocalOikosLanguage.current == OikosLanguage.Portuguese || portuguese == value) return portuguese
+    val words = value.replace(Regex("([a-z])([A-Z])"), "$1 $2").lowercase()
+    return if (portuguese.first().isUpperCase()) words.replaceFirstChar { it.uppercase() } else words
 }
 
 @Composable

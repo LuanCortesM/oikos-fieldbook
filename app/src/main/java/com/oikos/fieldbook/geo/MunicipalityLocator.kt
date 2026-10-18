@@ -1,5 +1,7 @@
 package com.oikos.fieldbook.geo
 
+import com.oikos.fieldbook.util.UiLanguage
+
 import java.io.ByteArrayInputStream
 import java.io.DataInputStream
 import java.io.IOException
@@ -43,8 +45,8 @@ class MunicipalityLocator(private val data: ByteArray) {
     init {
         val input = DataInputStream(ByteArrayInputStream(data))
         val magic = ByteArray(4).also { input.readFully(it) }
-        if (String(magic, Charsets.US_ASCII) != "OIKM") throw IOException("malha municipal com formato desconhecido")
-        if (input.readByte().toInt() != 1) throw IOException("versão da malha municipal não suportada")
+        if (String(magic, Charsets.US_ASCII) != "OIKM") throw IOException(UiLanguage.t("malha municipal com formato desconhecido", "municipal map with an unknown format"))
+        if (input.readByte().toInt() != 1) throw IOException(UiLanguage.t("versão da malha municipal não suportada", "unsupported municipal map version"))
         scale = input.readInt()
         val count = input.readInt()
         entries = List(count) {
