@@ -74,6 +74,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.NearMe
@@ -4909,15 +4910,17 @@ private fun ImportPackageButton(viewModel: AppViewModel, projects: List<ProjectE
             }
         )
     }
-    // Um botao so para a troca entre celulares: direto do celular ao lado (sem
-    // internet e sem mexer em arquivos) ou o pacote que chegou como arquivo.
+    // Um botao so, "Importar": o pacote que chegou como arquivo ou direto do
+    // celular ao lado (sem internet e sem mexer em arquivos).
     var choosing by remember { mutableStateOf(false) }
     if (choosing) {
         PhoneTransferChooser(
-            title = ui("Receber de outro celular"),
-            nearbyTitle = ui("Do celular ao lado"),
-            fileTitle = ui("De um arquivo"),
+            title = ui("Importar"),
+            nearbyTitle = ui("Importar de outro celular"),
+            nearbyDetails = ui("Direto do celular ao lado, sem internet (Bluetooth e Wi-Fi)."),
+            fileTitle = ui("Importar de um arquivo"),
             fileDetails = ui("Pacote que chegou por WhatsApp, e-mail, Drive ou cabo."),
+            fileFirst = true,
             onNearby = {
                 choosing = false
                 askNearby()
@@ -4930,13 +4933,13 @@ private fun ImportPackageButton(viewModel: AppViewModel, projects: List<ProjectE
         )
     }
     OutlinedButton(onClick = { choosing = true }, modifier = Modifier.fillMaxWidth()) {
-        Icon(Icons.Default.PhoneAndroid, null)
+        Icon(Icons.Default.FileDownload, null)
         Spacer(Modifier.width(8.dp))
-        Text(ui("Receber de outro celular"))
+        Text(ui("Importar"))
     }
 }
 
-/** Escolha da troca entre celulares: direto para o celular ao lado ou por arquivo. */
+/** Escolha da troca entre celulares: direto com o celular ao lado ou por arquivo. */
 @Composable
 private fun PhoneTransferChooser(
     title: String,
@@ -4945,15 +4948,18 @@ private fun PhoneTransferChooser(
     fileDetails: String,
     onNearby: () -> Unit,
     onFile: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    nearbyDetails: String = ui("Direto, sem internet (Bluetooth e Wi-Fi)."),
+    fileFirst: Boolean = false
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                PhoneTransferOption(Icons.Default.NearMe, nearbyTitle, ui("Direto, sem internet (Bluetooth e Wi-Fi)."), onNearby)
-                PhoneTransferOption(Icons.Default.FolderOpen, fileTitle, fileDetails, onFile)
+                if (fileFirst) PhoneTransferOption(Icons.Default.FolderOpen, fileTitle, fileDetails, onFile)
+                PhoneTransferOption(Icons.Default.NearMe, nearbyTitle, nearbyDetails, onNearby)
+                if (!fileFirst) PhoneTransferOption(Icons.Default.FolderOpen, fileTitle, fileDetails, onFile)
             }
         },
         confirmButton = {},
@@ -5020,7 +5026,10 @@ private fun ImportPackageDialogs(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    OfflineMapChoice(selected = target == null, title = ui("Criar projeto novo"), details = manifest.newProjectName, onSelect = { target = null })
+                    // Pacote que ja esta todo aqui: so faz sentido juntar (criar novo daria erro).
+                    if (!manifest.alreadyImported) {
+                        OfflineMapChoice(selected = target == null, title = ui("Criar projeto novo"), details = manifest.newProjectName, onSelect = { target = null })
+                    }
                     projects.forEach { project ->
                         OfflineMapChoice(selected = target == project.id, title = "${ui("Juntar a")} ${project.name}", details = ui("as expedições entram neste projeto"), onSelect = { target = project.id })
                     }
@@ -5162,8 +5171,13 @@ private fun TransferProgress(bytes: Long, total: Long) {
     Text(ui("Não feche esta tela até terminar."), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
+/** "3,4 MB" no app em portugues e "3.4 MB" em ingles, seja qual for o idioma do aparelho. */
 private fun formatMegabytes(bytes: Long): String =
-    String.format(Locale.getDefault(), "%.1f MB", bytes / (1024.0 * 1024.0))
+    String.format(
+        if (com.oikos.fieldbook.util.UiLanguage.isPortuguese) Locale("pt", "BR") else Locale.US,
+        "%.1f MB",
+        bytes / (1024.0 * 1024.0)
+    )
 
 @Composable
 private fun TransferCode(code: String) {
@@ -5183,12 +5197,12 @@ private fun NearbySendDialog(viewModel: AppViewModel, projectId: Long, sessionId
     }
     AlertDialog(
         onDismissRequest = {},
-        title = { Text(ui("Enviar para celular próximo")) },
+        title = { Text(ui("Enviar para outro celular")) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 when (val current = state) {
                     is com.oikos.fieldbook.services.NearbyTransfer.State.Searching -> {
-                        Text(ui("No outro celular, toque em Receber de outro celular na tela inicial e escolha Do celular ao lado. Não precisa de internet."))
+                        Text(ui("No outro celular, toque em Importar na tela inicial e escolha Importar de outro celular. Não precisa de internet."))
                         if (current.peers.isEmpty()) {
                             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                             Text(ui("Procurando celulares..."), style = MaterialTheme.typography.labelMedium)
@@ -5250,7 +5264,7 @@ private fun NearbyReceiveDialog(viewModel: AppViewModel, onReceived: (File) -> U
     }
     AlertDialog(
         onDismissRequest = {},
-        title = { Text(ui("Receber de celular próximo")) },
+        title = { Text(ui("Importar de outro celular")) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 when (val current = state) {
@@ -6314,13 +6328,12 @@ private val englishText = mapOf(
     "Mais um indivíduo" to "One more individual",
     "malha do IBGE 2022" to "IBGE 2022 municipal mesh",
     "Usar" to "Use",
-    "Receber de celular próximo" to "Receive from a nearby phone",
-    "Receber de outro celular" to "Receive from another phone",
+    "Importar de outro celular" to "Import from another phone",
+    "Importar de um arquivo" to "Import from a file",
+    "Direto do celular ao lado, sem internet (Bluetooth e Wi-Fi)." to "Directly from the phone next to you, no internet (Bluetooth and Wi-Fi).",
     "Enviar para outro celular" to "Send to another phone",
-    "Do celular ao lado" to "From the phone next to you",
     "Para o celular ao lado" to "To the phone next to you",
     "Direto, sem internet (Bluetooth e Wi-Fi)." to "Direct, no internet (Bluetooth and Wi-Fi).",
-    "De um arquivo" to "From a file",
     "Pacote que chegou por WhatsApp, e-mail, Drive ou cabo." to "A package that arrived by WhatsApp, email, Drive or cable.",
     "Como arquivo" to "As a file",
     "Para mandar por WhatsApp, e-mail, Drive ou cabo." to "To send by WhatsApp, email, Drive or cable.",
@@ -6342,8 +6355,7 @@ private val englishText = mapOf(
     "de" to "of",
     "Não feche esta tela até terminar." to "Do not close this screen until it finishes.",
     "Código" to "Code",
-    "Enviar para celular próximo" to "Send to a nearby phone",
-    "No outro celular, toque em Receber de outro celular na tela inicial e escolha Do celular ao lado. Não precisa de internet." to "On the other phone, tap Receive from another phone on the home screen and choose From the phone next to you. No internet needed.",
+    "No outro celular, toque em Importar na tela inicial e escolha Importar de outro celular. Não precisa de internet." to "On the other phone, tap Import on the home screen and choose Import from another phone. No internet needed.",
     "Procurando celulares..." to "Looking for phones...",
     "Conectando a" to "Connecting to",
     "Confira se o mesmo código aparece no outro celular e peça para tocar em Aceitar." to "Check that the same code appears on the other phone and ask them to tap Accept.",

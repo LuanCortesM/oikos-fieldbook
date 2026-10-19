@@ -32,11 +32,15 @@ data class TransferManifest(
     /** Registros que existem nos dois aparelhos com conteudo diferente. */
     val conflicts: List<TransferConflict> = emptyList(),
     /** Projeto deste aparelho que ja tem as expedicoes do pacote (o destino provavel). */
-    val existingProjectId: Long? = null
-) {
-    /** Nome do projeto criado ao importar como novo: "Projeto (Maria Souza)". */
-    val newProjectName: String get() = ProjectTransfer.newProjectName(projectName, senderName)
-}
+    val existingProjectId: Long? = null,
+    /**
+     * Nome que o projeto teria ao importar como novo, ja livre neste aparelho:
+     * "Projeto (Maria Souza)" ou "Projeto (Maria Souza) (2)".
+     */
+    val newProjectName: String = "",
+    /** Todas as expedicoes do pacote ja estao aqui: so faz sentido juntar. */
+    val alreadyImported: Boolean = false
+)
 
 /** Campo que difere entre o registro deste aparelho e o que chegou. */
 data class FieldDifference(val column: String, val local: String, val incoming: String)
@@ -151,6 +155,11 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
     fun readManifest(input: InputStream): TransferManifest {
         val document = readDocument(ZipInputStream(input.buffered()))
         val tables = document.getJSONObject("tables")
+        val db = database.openHelper.readableDatabase
+        val sessions = tables.optJSONArray("sessions") ?: JSONArray()
+        val sessionsHere = (0 until sessions.length()).count { existingSession(db, sessions.getJSONObject(it).optString("eventId")) != null }
+        // O mesmo nome que insert() dara ao projeto novo.
+        val baseName = tables.optJSONArray("projects")?.optJSONObject(0)?.optString("name").orEmpty().ifBlank { "Projeto importado" }
         return TransferManifest(
             projectName = document.optString("projectName"),
             appVersion = document.optString("appVersion"),
@@ -161,7 +170,9 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
             media = tables.optJSONArray("media")?.length() ?: 0,
             senderName = senderName(tables),
             conflicts = conflicts(tables),
-            existingProjectId = existingProject(tables)
+            existingProjectId = existingProject(tables),
+            newProjectName = uniqueProjectName(db, newProjectName(baseName, senderName(tables))),
+            alreadyImported = sessions.length() > 0 && sessionsHere == sessions.length()
         )
     }
 

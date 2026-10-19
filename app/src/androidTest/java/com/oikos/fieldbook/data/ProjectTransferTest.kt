@@ -64,6 +64,8 @@ class ProjectTransferTest {
         val bytes = packageFromA()
         val manifest = ProjectTransfer(phoneB, filesB).readManifest(ByteArrayInputStream(bytes))
         assertEquals("Anuros", manifest.projectName)
+        assertTrue("nada dele aqui ainda", !manifest.alreadyImported)
+        assertEquals("Anuros", manifest.newProjectName)
         assertEquals(2, manifest.occurrences)
 
         val summary = ProjectTransfer(phoneB, filesB).import(ByteArrayInputStream(bytes), null)
@@ -94,6 +96,10 @@ class ProjectTransferTest {
         }
         // A equipe registrou mais uma especie e mandou o pacote atualizado.
         phoneA.occurrenceDao().insert(OccurrenceEntity(id = 3, projectId = 1, sessionId = 1, occurrenceId = "OC-A-3", scientificName = "Scinax sp."))
+        // A expedicao ja esta aqui: a tela so oferece juntar, ao projeto dela.
+        val again = ProjectTransfer(phoneB, filesB).readManifest(ByteArrayInputStream(packageFromA()))
+        assertTrue(again.alreadyImported)
+        assertEquals(first.projectId, again.existingProjectId)
         val second = ProjectTransfer(phoneB, filesB).import(ByteArrayInputStream(packageFromA()), first.projectId)
         assertEquals(1, second.occurrencesAdded)
         assertEquals(2, second.occurrencesSkipped)

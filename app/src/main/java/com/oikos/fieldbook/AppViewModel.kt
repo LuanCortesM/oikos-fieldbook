@@ -1329,7 +1329,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val scopeName = sessionId?.let { id -> repository.getSession(id)?.let { it.name.ifBlank { it.eventId } } } ?: project.name
             val file = mediaFiles.newExportFile(com.oikos.fieldbook.util.inProjectLanguage(project.language, "pacote_", "package_") + "${OikosExporter.safeName(scopeName)}_${LocalDate.now()}.zip")
             file.outputStream().use { transfer.export(projectId, sessionId, it, "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})") }
-            ExportResult(file, "application/zip", t("Envie o pacote ao outro celular (WhatsApp, e-mail, Drive ou cabo) e, lá, toque em Receber de outro celular na tela inicial e escolha De um arquivo.", "Send the package to the other phone (WhatsApp, email, Drive or cable) and, there, tap Receive from another phone on the home screen and choose From a file."))
+            ExportResult(file, "application/zip", t("Envie o pacote ao outro celular (WhatsApp, e-mail, Drive ou cabo) e, lá, toque em Importar na tela inicial e escolha Importar de um arquivo.", "Send the package to the other phone (WhatsApp, email, Drive or cable) and, there, tap Import on the home screen and choose Import from a file."))
         }
     }
 
