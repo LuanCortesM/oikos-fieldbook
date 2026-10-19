@@ -38,6 +38,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -157,6 +158,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -213,6 +215,7 @@ import com.oikos.fieldbook.util.parseFlatJsonMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.Normalizer
@@ -255,7 +258,14 @@ class MainActivity : ComponentActivity() {
     private val viewModel: AppViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
+        val systemSplash = installSplashScreen()
+        // A abertura do sistema (Android 12+) cobre os primeiros quadros do app:
+        // a barra do Itaguare so comeca quando ela sai, para aparecer desde o inicio.
+        val systemSplashGone = mutableStateOf(savedInstanceState != null)
+        systemSplash.setOnExitAnimationListener { provider ->
+            provider.remove()
+            systemSplashGone.value = true
+        }
         super.onCreate(savedInstanceState)
         applySystemBars(darkTheme = true)
         val languagePrefs = getSharedPreferences("oikos_app_settings", Context.MODE_PRIVATE)
@@ -276,8 +286,15 @@ class MainActivity : ComponentActivity() {
                 "en" -> OikosLanguage.English
                 else -> deviceLanguage
             }
+            var launchBarRunning by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) {
-                delay(1_150)
+                // Sem o aviso de saida (abertura sem a tela do sistema), segue em 400 ms.
+                kotlinx.coroutines.withTimeoutOrNull(400) {
+                    androidx.compose.runtime.snapshotFlow { systemSplashGone.value }.first { it }
+                }
+                launchBarRunning = true
+                // A caminhada e um respiro com o trilheiro parado no fim.
+                delay(LAUNCH_WALK_MS + 250L)
                 showLaunch = false
             }
             LaunchedEffect(darkTheme) {
@@ -287,7 +304,7 @@ class MainActivity : ComponentActivity() {
                 OikosTheme(darkTheme = darkTheme) {
                     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                         if (showLaunch) {
-                            OikosLaunchScreen()
+                            OikosLaunchScreen(barRunning = launchBarRunning)
                         } else {
                             OikosApp(
                                 viewModel,
@@ -360,22 +377,51 @@ private val LocalOikosLanguage = staticCompositionLocalOf { OikosLanguage.Portug
 /** Mapa offline escolhido em Configuracoes; nulo = OpenStreetMap pela internet. */
 private val LocalOfflineMap = compositionLocalOf<OfflineMap?> { null }
 
+/** Tempo da caminhada do trilheiro na abertura. */
+private const val LAUNCH_WALK_MS = 3_000L
+
+/** Distancia entre o pe do logo e o topo do contorno do Itaguare na abertura. */
+private val LAUNCH_BAR_GAP = 60.dp
+
 @Composable
-private fun OikosLaunchScreen() {
+private fun OikosLaunchScreen(barRunning: Boolean) {
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF0B0B0D)),
         contentAlignment = Alignment.Center
     ) {
-        Image(
-            painter = painterResource(id = R.drawable.oikos_brand_logo),
-            contentDescription = "Oikos FieldBook logo",
+        // Logo no mesmo lugar e tamanho de antes (centro; 84% da largura, ate
+        // 210 dp de altura). O contorno do Itaguare fica abaixo dele, com o
+        // trilheiro andando por ele, sem empurrar o logo para cima.
+        Box(
             modifier = Modifier
                 .fillMaxWidth(0.84f)
-                .height(210.dp),
-            contentScale = ContentScale.Fit
-        )
+                .widthIn(max = 485.dp),
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.oikos_brand_logo),
+                contentDescription = "Oikos FieldBook logo",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1200f / 520f),
+                contentScale = ContentScale.Fit
+            )
+            com.oikos.fieldbook.ui.ItaguareLoadingBar(
+                running = barRunning,
+                durationMillis = LAUNCH_WALK_MS.toInt(),
+                modifier = Modifier
+                    .fillMaxWidth(0.70f)
+                    .layout { measurable, constraints ->
+                        val bar = measurable.measure(constraints)
+                        layout(bar.width, bar.height) {
+                            bar.place(0, bar.height + LAUNCH_BAR_GAP.roundToPx())
+                        }
+                    },
+                hikerHeight = 11.25.dp
+            )
+        }
     }
 }
 
