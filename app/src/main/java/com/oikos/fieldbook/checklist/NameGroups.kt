@@ -5,23 +5,23 @@ package com.oikos.fieldbook.checklist
  * divisao da propria lista (2o nivel de higherClassification); fauna, a classe
  * ou o filo. Nome sem grupo conhecido ("") passa em qualquer filtro.
  */
-enum class NameGroup(val code: String, val pt: String, val en: String, val flora: Boolean) {
-    ANGIOSPERMS("angio", "Angiospermas", "Angiosperms", true),
-    GYMNOSPERMS("gimno", "Gimnospermas", "Gymnosperms", true),
-    FERNS("samam", "Samambaias e licófitas", "Ferns and lycophytes", true),
-    BRYOPHYTES("brio", "Briófitas", "Bryophytes", true),
-    ALGAE("algas", "Algas", "Algae", true),
-    FUNGI("fungos", "Fungos", "Fungi", true),
-    AMPHIBIANS("anfib", "Anfíbios", "Amphibians", false),
-    REPTILES("rept", "Répteis", "Reptiles", false),
-    BIRDS("aves", "Aves", "Birds", false),
-    MAMMALS("mamif", "Mamíferos", "Mammals", false),
-    FISHES("peixes", "Peixes", "Fishes", false),
-    INSECTS("insetos", "Insetos", "Insects", false),
-    ARACHNIDS("aracn", "Aracnídeos", "Arachnids", false),
-    OTHER_ARTHROPODS("artrop", "Outros artrópodes", "Other arthropods", false),
-    MOLLUSCS("molus", "Moluscos", "Molluscs", false),
-    OTHER_INVERTEBRATES("invert", "Outros invertebrados", "Other invertebrates", false);
+enum class NameGroup(val code: String, val pt: String, val en: String, val es: String, val flora: Boolean) {
+    ANGIOSPERMS("angio", "Angiospermas", "Angiosperms", "Angiospermas", true),
+    GYMNOSPERMS("gimno", "Gimnospermas", "Gymnosperms", "Gimnospermas", true),
+    FERNS("samam", "Samambaias e licófitas", "Ferns and lycophytes", "Helechos y licófitas", true),
+    BRYOPHYTES("brio", "Briófitas", "Bryophytes", "Briófitas", true),
+    ALGAE("algas", "Algas", "Algae", "Algas", true),
+    FUNGI("fungos", "Fungos", "Fungi", "Hongos", true),
+    AMPHIBIANS("anfib", "Anfíbios", "Amphibians", "Anfibios", false),
+    REPTILES("rept", "Répteis", "Reptiles", "Reptiles", false),
+    BIRDS("aves", "Aves", "Birds", "Aves", false),
+    MAMMALS("mamif", "Mamíferos", "Mammals", "Mamíferos", false),
+    FISHES("peixes", "Peixes", "Fishes", "Peces", false),
+    INSECTS("insetos", "Insetos", "Insects", "Insectos", false),
+    ARACHNIDS("aracn", "Aracnídeos", "Arachnids", "Arácnidos", false),
+    OTHER_ARTHROPODS("artrop", "Outros artrópodes", "Other arthropods", "Otros artrópodos", false),
+    MOLLUSCS("molus", "Moluscos", "Molluscs", "Moluscos", false),
+    OTHER_INVERTEBRATES("invert", "Outros invertebrados", "Other invertebrates", "Otros invertebrados", false);
 
     companion object {
         fun byCode(code: String): NameGroup? = entries.firstOrNull { it.code == code }

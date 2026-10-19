@@ -1,5 +1,6 @@
 package com.oikos.fieldbook.services
 
+import com.oikos.fieldbook.util.AppLanguage
 import com.oikos.fieldbook.util.CoordinateUtils
 import java.util.Locale
 import kotlin.math.ceil
@@ -29,18 +30,23 @@ data class AveragedFix(
     val durationMillis: Long
 ) {
     /** Texto para dwc:georeferenceRemarks: como a coordenada foi obtida, no idioma do projeto. */
-    fun remarks(english: Boolean = false): String {
+    fun remarks(language: AppLanguage = AppLanguage.PT): String {
         val spread = String.format(Locale.US, "%.1f m", spreadMeters)
         val seconds = durationMillis / 1000
         val accuracy = reportedAccuracy?.let { String.format(Locale.US, "%.1f m", it) }
-        return if (english) {
-            "Mean of $used phone GNSS readings ($received received in $seconds s); " +
-                "receiver-reported accuracy (median) ${accuracy ?: "not reported"}; maximum spread $spread; " +
-                "uncertainty = max(2 × accuracy, spread)."
-        } else {
-            "Média de $used leituras GNSS do celular (de $received recebidas em $seconds s); " +
-                "precisão informada pelo receptor (mediana) ${accuracy ?: "não informada"}; dispersão máxima $spread; " +
-                "incerteza = máx(2 × precisão, dispersão)."
+        return when (language) {
+            AppLanguage.EN ->
+                "Mean of $used phone GNSS readings ($received received in $seconds s); " +
+                    "receiver-reported accuracy (median) ${accuracy ?: "not reported"}; maximum spread $spread; " +
+                    "uncertainty = max(2 × accuracy, spread)."
+            AppLanguage.ES ->
+                "Promedio de $used lecturas GNSS del celular (de $received recibidas en $seconds s); " +
+                    "precisión informada por el receptor (mediana) ${accuracy ?: "no informada"}; dispersión máxima $spread; " +
+                    "incertidumbre = máx(2 × precisión, dispersión)."
+            AppLanguage.PT ->
+                "Média de $used leituras GNSS do celular (de $received recebidas em $seconds s); " +
+                    "precisão informada pelo receptor (mediana) ${accuracy ?: "não informada"}; dispersão máxima $spread; " +
+                    "incerteza = máx(2 × precisão, dispersão)."
         }
     }
 }

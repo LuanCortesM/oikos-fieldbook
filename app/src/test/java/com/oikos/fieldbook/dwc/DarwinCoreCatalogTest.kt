@@ -115,4 +115,14 @@ class DarwinCoreCatalogTest {
             assertTrue("faltando $termo", termos.contains(termo))
         }
     }
+
+    @Test
+    fun `todo campo do catalogo tem rotulo em espanhol`() {
+        val termos = DarwinCoreCatalog.allFields.map { it.term }.toSet()
+        val faltando = termos - spanishFieldLabels.keys
+        assertTrue("sem espanhol: $faltando", faltando.isEmpty())
+        val sobrando = spanishFieldLabels.keys - termos
+        assertTrue("termo inexistente: $sobrando", sobrando.isEmpty())
+        assertTrue(spanishFieldLabels.values.none { it.isBlank() })
+    }
 }

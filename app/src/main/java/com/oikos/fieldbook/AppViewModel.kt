@@ -121,8 +121,8 @@ data class RecordingState(
 
 class AppViewModel(application: Application) : AndroidViewModel(application) {
     // Mensagens no idioma da tela (Configuracoes > Idioma).
-    private fun t(pt: String, en: String) = UiLanguage.t(pt, en)
-    private fun qty(n: Number, ptOne: String, ptMany: String, enOne: String, enMany: String) = UiLanguage.count(n, ptOne, ptMany, enOne, enMany)
+    private fun t(pt: String, en: String, es: String) = UiLanguage.t(pt, en, es)
+    private fun qty(n: Number, ptOne: String, ptMany: String, enOne: String, enMany: String, esOne: String, esMany: String) = UiLanguage.count(n, ptOne, ptMany, enOne, enMany, esOne, esMany)
     private fun why(error: Throwable) = error.message ?: error.javaClass.simpleName
 
     private val repository: OikosRepository = (application as OikosApplication).repository
@@ -184,8 +184,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         refreshOfflineMaps()
         resumeInterruptedTracks()
         when (val outcome = (application as OikosApplication).restoreOutcome) {
-            RestoreOutcome.Restored -> _message.value = t("Backup restaurado. Confira projetos, expedições e mídias.", "Backup restored. Check projects, expeditions and media.")
-            is RestoreOutcome.Failed -> _message.value = t("A restauração do backup não foi concluída: ${outcome.reason}", "The backup restore did not finish: ${outcome.reason}")
+            RestoreOutcome.Restored -> _message.value = t("Backup restaurado. Confira projetos, expedições e mídias.", "Backup restored. Check projects, expeditions and media.", "Copia de seguridad restaurada. Revisa proyectos, salidas de campo y archivos multimedia.")
+            is RestoreOutcome.Failed -> _message.value = t("A restauração do backup não foi concluída: ${outcome.reason}", "The backup restore did not finish: ${outcome.reason}", "La restauración de la copia de seguridad no terminó: ${outcome.reason}")
             RestoreOutcome.None -> Unit
         }
     }
@@ -244,16 +244,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun installEmbeddedChecklist(source: ChecklistSource, announce: Boolean = true): kotlinx.coroutines.Job {
         if (_checklistProgress.value.containsKey(source.key)) return kotlinx.coroutines.Job().apply { complete() }
         settings.edit().remove(KEY_LIST_REMOVED + source.key).apply()
-        _checklistProgress.value = _checklistProgress.value + (source.key to BackupProgress(t("Preparando a lista...", "Preparing the list..."), null))
+        _checklistProgress.value = _checklistProgress.value + (source.key to BackupProgress(t("Preparando a lista...", "Preparing the list...", "Preparando la lista..."), null))
         return viewModelScope.launch {
             runCatching {
                 checklistService.installEmbedded(source) { stage, fraction ->
                     _checklistProgress.value = _checklistProgress.value + (source.key to BackupProgress(stage, fraction))
                 }
             }.onSuccess {
-                if (announce) _message.value = t("${it.title}: ${it.taxonCount} nomes prontos, sem internet.", "${it.title}: ${it.taxonCount} names ready, no internet needed.")
+                if (announce) _message.value = t("${it.title}: ${it.taxonCount} nomes prontos, sem internet.", "${it.title}: ${it.taxonCount} names ready, no internet needed.", "${it.title}: ${it.taxonCount} nombres listos, sin necesidad de internet.")
             }.onFailure {
-                _message.value = t("Não foi possível instalar ${source.title}: ${why(it)}.", "Could not install ${source.title}: ${why(it)}.")
+                _message.value = t("Não foi possível instalar ${source.title}: ${why(it)}.", "Could not install ${source.title}: ${why(it)}.", "No se pudo instalar ${source.title}: ${why(it)}.")
             }
             _checklistProgress.value = _checklistProgress.value - source.key
         }
@@ -262,7 +262,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun downloadChecklist(source: ChecklistSource) {
         if (_checklistProgress.value.containsKey(source.key)) return
         settings.edit().remove(KEY_LIST_REMOVED + source.key).apply()
-        _checklistProgress.value = _checklistProgress.value + (source.key to BackupProgress(t("Conectando...", "Connecting..."), null))
+        _checklistProgress.value = _checklistProgress.value + (source.key to BackupProgress(t("Conectando...", "Connecting...", "Conectando..."), null))
         viewModelScope.launch {
             runCatching {
                 checklistService.download(source) { stage, fraction ->
@@ -270,9 +270,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }.onSuccess {
                 _latestVersions.value = _latestVersions.value + (source.key to RemoteVersion(it.version, it.pubDate))
-                _message.value = t("${it.title}: ${it.taxonCount} nomes instalados (versão ${it.version}).", "${it.title}: ${it.taxonCount} names installed (version ${it.version}).")
+                _message.value = t("${it.title}: ${it.taxonCount} nomes instalados (versão ${it.version}).", "${it.title}: ${it.taxonCount} names installed (version ${it.version}).", "${it.title}: ${it.taxonCount} nombres instalados (versión ${it.version}).")
             }.onFailure {
-                _message.value = t("Não foi possível baixar ${source.title}: ${why(it)}.", "Could not download ${source.title}: ${why(it)}.")
+                _message.value = t("Não foi possível baixar ${source.title}: ${why(it)}.", "Could not download ${source.title}: ${why(it)}.", "No se pudo descargar ${source.title}: ${why(it)}.")
             }
             _checklistProgress.value = _checklistProgress.value - source.key
         }
@@ -281,14 +281,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun importChecklistFile(uri: Uri) {
         val key = "arquivo"
         if (_checklistProgress.value.containsKey(key)) return
-        _checklistProgress.value = _checklistProgress.value + (key to BackupProgress(t("Lendo o arquivo...", "Reading the file..."), null))
+        _checklistProgress.value = _checklistProgress.value + (key to BackupProgress(t("Lendo o arquivo...", "Reading the file...", "Leyendo el archivo..."), null))
         viewModelScope.launch {
             runCatching {
                 checklistService.importFile(uri) { stage, fraction ->
                     _checklistProgress.value = _checklistProgress.value + (key to BackupProgress(stage, fraction))
                 }
-            }.onSuccess { _message.value = t("${it.title}: ${it.taxonCount} nomes instalados.", "${it.title}: ${it.taxonCount} names installed.") }
-                .onFailure { _message.value = t("Não foi possível importar a lista: ${why(it)}.", "Could not import the list: ${why(it)}.") }
+            }.onSuccess { _message.value = t("${it.title}: ${it.taxonCount} nomes instalados.", "${it.title}: ${it.taxonCount} names installed.", "${it.title}: ${it.taxonCount} nombres instalados.") }
+                .onFailure { _message.value = t("Não foi possível importar a lista: ${why(it)}.", "Could not import the list: ${why(it)}.", "No se pudo importar la lista: ${why(it)}.") }
             _checklistProgress.value = _checklistProgress.value - key
         }
     }
@@ -298,7 +298,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             // Lista oficial removida pelo pesquisador nao volta sozinha na proxima abertura.
             if (ChecklistSources.byKey(checklist.sourceKey) != null) settings.edit().putBoolean(KEY_LIST_REMOVED + checklist.sourceKey, true).apply()
             checklistService.remove(checklist)
-            _message.value = t("Lista removida: ${checklist.title}.", "List removed: ${checklist.title}.")
+            _message.value = t("Lista removida: ${checklist.title}.", "List removed: ${checklist.title}.", "Lista eliminada: ${checklist.title}.")
         }
     }
 
@@ -332,23 +332,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun createBackup(target: Uri) {
         if (_backupProgress.value != null) return
-        _backupProgress.value = BackupProgress(t("Criando backup...", "Creating backup..."), 0f)
+        _backupProgress.value = BackupProgress(t("Criando backup...", "Creating backup...", "Creando copia de seguridad..."), 0f)
         viewModelScope.launch {
             runCatching {
                 backupService.create(target) { done, total ->
-                    _backupProgress.value = BackupProgress(t("Criando backup...", "Creating backup..."), if (total > 0) done.toFloat() / total else null)
+                    _backupProgress.value = BackupProgress(t("Criando backup...", "Creating backup...", "Creando copia de seguridad..."), if (total > 0) done.toFloat() / total else null)
                 }
             }.onSuccess { manifest ->
                 val now = System.currentTimeMillis()
                 settings.edit().putLong(KEY_LAST_BACKUP, now).apply()
                 _lastBackupAt.value = now
-                _message.value = t("Backup salvo: ", "Backup saved: ") + listOf(
-                    qty(manifest.projects, "projeto", "projetos", "project", "projects"),
-                    qty(manifest.occurrences, "ocorrência", "ocorrências", "occurrence", "occurrences"),
-                    qty(manifest.mediaFiles, "mídia", "mídias", "media file", "media files")
+                _message.value = t("Backup salvo: ", "Backup saved: ", "Copia de seguridad guardada:") + listOf(
+                    qty(manifest.projects, "projeto", "projetos", "project", "projects", "proyecto", "proyectos"),
+                    qty(manifest.occurrences, "ocorrência", "ocorrências", "occurrence", "occurrences", "registro", "registros"),
+                    qty(manifest.mediaFiles, "mídia", "mídias", "media file", "media files", "archivo multimedia", "archivos multimedia")
                 ).joinToString(", ") + "."
             }.onFailure {
-                _message.value = t("O backup falhou: ${why(it)}. Confira o espaço no destino.", "The backup failed: ${why(it)}. Check the free space at the destination.")
+                _message.value = t("O backup falhou: ${why(it)}. Confira o espaço no destino.", "The backup failed: ${why(it)}. Check the free space at the destination.", "La copia de seguridad falló: ${why(it)}. Revisa el espacio libre en el destino.")
             }
             _backupProgress.value = null
         }
@@ -357,7 +357,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun inspectBackup(source: Uri, onResult: (BackupManifest?) -> Unit) {
         viewModelScope.launch {
             val manifest = backupService.inspect(source)
-            if (manifest == null) _message.value = t("Este arquivo não é um backup do Oikos FieldBook.", "This file is not an Oikos FieldBook backup.")
+            if (manifest == null) _message.value = t("Este arquivo não é um backup do Oikos FieldBook.", "This file is not an Oikos FieldBook backup.", "Este archivo no es una copia de seguridad de Oikos FieldBook.")
             onResult(manifest)
         }
     }
@@ -368,7 +368,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun restoreBackup(source: Uri, onReadyToRestart: () -> Unit) {
         if (_backupProgress.value != null) return
-        _backupProgress.value = BackupProgress(t("Preparando a restauração...", "Preparing the restore..."), null)
+        _backupProgress.value = BackupProgress(t("Preparando a restauração...", "Preparing the restore...", "Preparando la restauración..."), null)
         viewModelScope.launch {
             stopRecording()
             stopTrackService()
@@ -378,7 +378,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     onReadyToRestart()
                 }
                 .onFailure {
-                    _message.value = t("Não foi possível restaurar: ${why(it)}. Seus dados atuais não foram alterados.", "Could not restore: ${why(it)}. Your current data was not changed.")
+                    _message.value = t("Não foi possível restaurar: ${why(it)}. Seus dados atuais não foram alterados.", "Could not restore: ${why(it)}. Your current data was not changed.", "No se pudo restaurar: ${why(it)}. Tus datos actuales no se modificaron.")
                 }
             _backupProgress.value = null
         }
@@ -392,8 +392,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
      */
     private fun saveFailureMessage(error: Throwable, duplicate: String): String = when (error) {
         is SQLiteConstraintException -> duplicate
-        is SQLiteFullException -> t("Sem espaço no aparelho: nada foi salvo. Libere espaço e toque em Salvar de novo; o que você digitou continua na tela.", "No space left on the device: nothing was saved. Free up space and tap Save again; what you typed is still on screen.")
-        else -> t("Nada foi salvo: ${why(error)}. O que você digitou continua na tela.", "Nothing was saved: ${why(error)}. What you typed is still on screen.")
+        is SQLiteFullException -> t("Sem espaço no aparelho: nada foi salvo. Libere espaço e toque em Salvar de novo; o que você digitou continua na tela.", "No space left on the device: nothing was saved. Free up space and tap Save again; what you typed is still on screen.", "No queda espacio en el dispositivo: no se guardó nada. Libera espacio y toca Guardar de nuevo; lo que escribiste sigue en la pantalla.")
+        else -> t("Nada foi salvo: ${why(error)}. O que você digitou continua na tela.", "Nothing was saved: ${why(error)}. What you typed is still on screen.", "No se guardó nada: ${why(error)}. Lo que escribiste sigue en la pantalla.")
     }
 
     fun saveProject(project: ProjectEntity, onFailed: () -> Unit = {}, onSaved: (Long) -> Unit) {
@@ -405,7 +405,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 onSaved(id)
             } catch (error: SQLiteException) {
-                _message.value = saveFailureMessage(error, t("Já existe um projeto igual.", "An identical project already exists."))
+                _message.value = saveFailureMessage(error, t("Já existe um projeto igual.", "An identical project already exists.", "Ya existe un proyecto idéntico."))
                 onFailed()
             }
         }
@@ -415,7 +415,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             stopTrackServiceIf { it.projectId == project.id }
             finishRecordingFor { it.projectId == project.id }
-            moveToTrash(t("Projeto", "Project"), onDone) { trash.trashProject(project.id, project.name) }
+            moveToTrash(t("Projeto", "Project", "Proyecto"), onDone) { trash.trashProject(project.id, project.name) }
         }
     }
 
@@ -427,9 +427,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 repository.replaceFieldConfig(projectId, fields)
-                _message.value = t("Configuração de campos salva.", "Field settings saved.")
+                _message.value = t("Configuração de campos salva.", "Field settings saved.", "Configuración de campos guardada.")
             } catch (error: SQLiteException) {
-                _message.value = t("A configuração de campos não foi salva: ${why(error)}.", "Field settings were not saved: ${why(error)}.")
+                _message.value = t("A configuração de campos não foi salva: ${why(error)}.", "Field settings were not saved: ${why(error)}.", "La configuración de campos no se guardó: ${why(error)}.")
             }
         }
     }
@@ -447,7 +447,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             onFailed()
             return
         }
-        if (session.eventDate.isBlank()) _message.value = t("Aviso: expedição salva sem data de coleta.", "Warning: expedition saved without a collection date.")
+        if (session.eventDate.isBlank()) _message.value = t("Aviso: expedição salva sem data de coleta.", "Warning: expedition saved without a collection date.", "Aviso: salida de campo guardada sin fecha de colecta.")
         viewModelScope.launch {
             try {
                 val id = if (session.id == 0L) repository.createSession(session) else {
@@ -456,7 +456,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 onSaved(id)
             } catch (error: SQLiteException) {
-                _message.value = saveFailureMessage(error, t("eventID já existe. Use um identificador único.", "eventID already exists. Use a unique identifier."))
+                _message.value = saveFailureMessage(error, t("eventID já existe. Use um identificador único.", "eventID already exists. Use a unique identifier.", "El eventID ya existe. Usa un identificador único."))
                 onFailed()
             }
         }
@@ -469,7 +469,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             // marcada como ativa sem gravar mais nada.
             stopTrackServiceIf { it.sessionId == session.id }
             finishRecordingFor { it.sessionId == session.id }
-            moveToTrash(t("Expedição", "Expedition"), onDone) { trash.trashSession(session.projectId, session.id, session.name.ifBlank { session.eventId }) }
+            moveToTrash(t("Expedição", "Expedition", "Salida de campo"), onDone) { trash.trashSession(session.projectId, session.id, session.name.ifBlank { session.eventId }) }
         }
     }
 
@@ -479,11 +479,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun moveToTrash(what: String, onDone: () -> Unit, action: () -> TrashItem) {
         runCatching { withContext(Dispatchers.IO) { action() } }
             .onSuccess {
-                _message.value = t("$what na lixeira por ${TrashService.RETENTION_DAYS} dias (Configurações > Lixeira).", "$what moved to the trash for ${TrashService.RETENTION_DAYS} days (Settings > Trash).")
+                _message.value = t("$what na lixeira por ${TrashService.RETENTION_DAYS} dias (Configurações > Lixeira).", "$what moved to the trash for ${TrashService.RETENTION_DAYS} days (Settings > Trash).", "$what en la papelera por ${TrashService.RETENTION_DAYS} días (Configuración > Papelera).")
                 refreshTrash()
                 onDone()
             }
-            .onFailure { _message.value = t("Não foi possível apagar: ${why(it)}.", "Could not delete: ${why(it)}.") }
+            .onFailure { _message.value = t("Não foi possível apagar: ${why(it)}.", "Could not delete: ${why(it)}.", "No se pudo eliminar: ${why(it)}.") }
     }
 
     fun refreshTrash() {
@@ -495,12 +495,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             runCatching { withContext(Dispatchers.IO) { trash.restore(item) } }
                 .onSuccess { failed ->
                     _message.value = when {
-                        failed == 0 -> t("Restaurado: ${item.title}.", "Restored: ${item.title}.")
-                        failed == 1 -> t("Restaurado: ${item.title}, mas 1 arquivo não pôde voltar (falta de espaço?).", "Restored: ${item.title}, but 1 file could not be brought back (out of space?).")
-                        else -> t("Restaurado: ${item.title}, mas $failed arquivos não puderam voltar (falta de espaço?).", "Restored: ${item.title}, but $failed files could not be brought back (out of space?).")
+                        failed == 0 -> t("Restaurado: ${item.title}.", "Restored: ${item.title}.", "Restaurado: ${item.title}.")
+                        failed == 1 -> t("Restaurado: ${item.title}, mas 1 arquivo não pôde voltar (falta de espaço?).", "Restored: ${item.title}, but 1 file could not be brought back (out of space?).", "Restaurado: ${item.title}, pero 1 archivo no se pudo recuperar (¿falta de espacio?).")
+                        else -> t("Restaurado: ${item.title}, mas $failed arquivos não puderam voltar (falta de espaço?).", "Restored: ${item.title}, but $failed files could not be brought back (out of space?).", "Restaurado: ${item.title}, pero $failed archivos no se pudieron recuperar (¿falta de espacio?).")
                     }
                 }
-                .onFailure { _message.value = t("Não foi possível restaurar: ${why(it)}.", "Could not restore: ${why(it)}.") }
+                .onFailure { _message.value = t("Não foi possível restaurar: ${why(it)}.", "Could not restore: ${why(it)}.", "No se pudo restaurar: ${why(it)}.") }
             refreshTrash()
         }
     }
@@ -515,7 +515,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun emptyTrash() {
         viewModelScope.launch {
             withContext(Dispatchers.IO) { trash.list().forEach(trash::delete) }
-            _message.value = t("Lixeira esvaziada.", "Trash emptied.")
+            _message.value = t("Lixeira esvaziada.", "Trash emptied.", "Papelera vaciada.")
             refreshTrash()
         }
     }
@@ -542,12 +542,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     savedId
                 }
                 when {
-                    occurrence.latitude == null || occurrence.longitude == null -> _message.value = t("Aviso: registro salvo sem coordenadas.", "Warning: record saved without coordinates.")
-                    occurrence.scientificName.isBlank() -> _message.value = t("Aviso: registro salvo sem o nome da espécie.", "Warning: record saved without the species name.")
+                    occurrence.latitude == null || occurrence.longitude == null -> _message.value = t("Aviso: registro salvo sem coordenadas.", "Warning: record saved without coordinates.", "Aviso: registro guardado sin coordenadas.")
+                    occurrence.scientificName.isBlank() -> _message.value = t("Aviso: registro salvo sem o nome da espécie.", "Warning: record saved without the species name.", "Aviso: registro guardado sin el nombre de la especie.")
                 }
                 onSaved(id)
             } catch (error: SQLiteException) {
-                _message.value = saveFailureMessage(error, t("occurrenceID já existe. Use um identificador único.", "occurrenceID already exists. Use a unique identifier."))
+                _message.value = saveFailureMessage(error, t("occurrenceID já existe. Use um identificador único.", "occurrenceID already exists. Use a unique identifier.", "El occurrenceID ya existe. Usa un identificador único."))
                 onFailed()
             }
         }
@@ -558,7 +558,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             finishRecordingFor { it.occurrenceId == occurrence.id }
             // Antes as linhas das midias ficavam no banco, apontando para
             // arquivos apagados; agora saem junto com a ocorrencia.
-            moveToTrash(t("Ocorrência", "Occurrence"), onDone) { trash.trashOccurrence(occurrence.id, occurrence.scientificName.ifBlank { occurrence.occurrenceId }) }
+            moveToTrash(t("Ocorrência", "Occurrence", "Registro"), onDone) { trash.trashOccurrence(occurrence.id, occurrence.scientificName.ifBlank { occurrence.occurrenceId }) }
         }
     }
 
@@ -572,13 +572,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun updateMedia(media: MediaEntity) {
         viewModelScope.launch {
             repository.updateMedia(media)
-            _message.value = t("Mídia atualizada.", "Media updated.")
+            _message.value = t("Mídia atualizada.", "Media updated.", "Archivo multimedia actualizado.")
         }
     }
 
     fun deleteMedia(media: MediaEntity) {
         viewModelScope.launch {
-            moveToTrash(t("Mídia", "Media file"), {}) { trash.trashMedia(media.id, media.fileName) }
+            moveToTrash(t("Mídia", "Media file", "Archivo multimedia"), {}) { trash.trashMedia(media.id, media.fileName) }
         }
     }
 
@@ -618,8 +618,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             } catch (error: SQLiteException) {
                 // Antes o erro escapava da corrotina e fechava o app. O arquivo
                 // fica no aparelho; so o registro nao foi feito.
-                val reason = if (error is SQLiteFullException) t("sem espaço no aparelho", "no space left on the device") else why(error)
-                _message.value = t("A mídia ${media.fileName} não pôde ser registrada ($reason). Libere espaço e registre de novo.", "The media file ${media.fileName} could not be recorded ($reason). Free up space and record it again.")
+                val reason = if (error is SQLiteFullException) t("sem espaço no aparelho", "no space left on the device", "no queda espacio en el dispositivo") else why(error)
+                _message.value = t("A mídia ${media.fileName} não pôde ser registrada ($reason). Libere espaço e registre de novo.", "The media file ${media.fileName} could not be recorded ($reason). Free up space and record it again.", "El archivo multimedia ${media.fileName} no se pudo registrar ($reason). Libera espacio y regístralo de nuevo.")
                 return false
             }
             key in discardedDrafts -> withContext(Dispatchers.IO) { mediaFiles.deleteIfManaged(media.filePath) }
@@ -637,7 +637,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val app = getApplication<Application>()
         val free = allocatableBytes(app, app.filesDir)
         if (free >= MIN_MEDIA_FREE_BYTES) return true
-        _message.value = t("Pouco espaço livre (${free / (1024 * 1024)} MB). Libere espaço no aparelho antes de fotografar ou importar.", "Low free space (${free / (1024 * 1024)} MB). Free up space before taking photos or importing.")
+        _message.value = t("Pouco espaço livre (${free / (1024 * 1024)} MB). Libere espaço no aparelho antes de fotografar ou importar.", "Low free space (${free / (1024 * 1024)} MB). Free up space before taking photos or importing.", "Poco espacio libre (${free / (1024 * 1024)} MB). Libera espacio en el dispositivo antes de fotografiar o importar.")
         return false
     }
 
@@ -659,7 +659,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 if (!file.isFile || file.length() == 0L) {
-                    _message.value = t("A câmera não entregou a foto. Tente de novo.", "The camera did not return the photo. Try again.")
+                    _message.value = t("A câmera não entregou a foto. Tente de novo.", "The camera did not return the photo. Try again.", "La cámara no entregó la foto. Inténtalo de nuevo.")
                     file.delete()
                     return@launch
                 }
@@ -667,11 +667,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     val meta = mediaFiles.readPhotoMetadata(file)
                     meta to runCatching { mediaFiles.compressImage(file, quality) }.exceptionOrNull()
                 }
-                if (compressError != null) _message.value = t("Foto guardada sem reduzir o tamanho (${why(compressError)}).", "Photo kept without reducing its size (${why(compressError)}).")
+                if (compressError != null) _message.value = t("Foto guardada sem reduzir o tamanho (${why(compressError)}).", "Photo kept without reducing its size (${why(compressError)}).", "Foto guardada sin reducir su tamaño (${why(compressError)}).")
                 onMetadata(metadata)
                 deliver(target, mediaEntity(target, "photo", file, "image/jpeg", subject, description, metadata))
             } catch (error: Exception) {
-                _message.value = t("Não foi possível registrar a foto: ${why(error)}.", "Could not record the photo: ${why(error)}.")
+                _message.value = t("Não foi possível registrar a foto: ${why(error)}.", "Could not record the photo: ${why(error)}.", "No se pudo registrar la foto: ${why(error)}.")
             } finally {
                 markBusy(target, -1)
             }
@@ -705,7 +705,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             result.onSuccess { (imported, metadata, compressError) ->
-                if (compressError != null) _message.value = t("Foto guardada sem reduzir o tamanho (${why(compressError)}).", "Photo kept without reducing its size (${why(compressError)}).")
+                if (compressError != null) _message.value = t("Foto guardada sem reduzir o tamanho (${why(compressError)}).", "Photo kept without reducing its size (${why(compressError)}).", "Foto guardada sin reducir su tamaño (${why(compressError)}).")
                 metadata?.let(onMetadata)
                 val file = imported.file
                 // Data de captura so a gravada no proprio arquivo (EXIF da foto); sem
@@ -728,7 +728,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 deliver(target, entity)
             }.onFailure {
-                _message.value = t("Não foi possível importar o arquivo: ${it.message ?: "erro de leitura"}.", "Could not import the file: ${it.message ?: "read error"}.")
+                _message.value = t("Não foi possível importar o arquivo: ${it.message ?: "erro de leitura"}.", "Could not import the file: ${it.message ?: "read error"}.", "No se pudo importar el archivo: ${it.message ?: "error de lectura"}.")
             }
         }
     }
@@ -748,22 +748,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun importOfflineMap(uri: Uri) {
         if (_offlineMapProgress.value != null) return
-        _offlineMapProgress.value = BackupProgress(t("Copiando o mapa...", "Copying the map..."), null)
+        _offlineMapProgress.value = BackupProgress(t("Copiando o mapa...", "Copying the map...", "Copiando el mapa..."), null)
         viewModelScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
                     offlineMapService.import(uri) { copied, total ->
                         _offlineMapProgress.value = BackupProgress(
-                            t("Copiando o mapa: ${copied / (1024 * 1024)} MB", "Copying the map: ${copied / (1024 * 1024)} MB"),
+                            t("Copiando o mapa: ${copied / (1024 * 1024)} MB", "Copying the map: ${copied / (1024 * 1024)} MB", "Copiando el mapa: ${copied / (1024 * 1024)} MB"),
                             if (total > 0) copied.toFloat() / total else null
                         )
                     }
                 }
             }.onSuccess { map ->
                 setActiveOfflineMap(map)
-                _message.value = t("Mapa instalado: ${map.name} (zoom ${map.minZoom} a ${map.maxZoom}).", "Map installed: ${map.name} (zoom ${map.minZoom} to ${map.maxZoom}).")
+                _message.value = t("Mapa instalado: ${map.name} (zoom ${map.minZoom} a ${map.maxZoom}).", "Map installed: ${map.name} (zoom ${map.minZoom} to ${map.maxZoom}).", "Mapa instalado: ${map.name} (zoom ${map.minZoom} a ${map.maxZoom}).")
             }.onFailure {
-                _message.value = t("Não foi possível instalar o mapa: ${why(it)}.", "Could not install the map: ${why(it)}.")
+                _message.value = t("Não foi possível instalar o mapa: ${why(it)}.", "Could not install the map: ${why(it)}.", "No se pudo instalar el mapa: ${why(it)}.")
             }
             _offlineMapProgress.value = null
             refreshOfflineMaps()
@@ -779,7 +779,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             if (_activeOfflineMap.value?.file == map.file) setActiveOfflineMap(null)
             withContext(Dispatchers.IO) { offlineMapService.remove(map) }
-            _message.value = t("Mapa removido: ${map.name}.", "Map removed: ${map.name}.")
+            _message.value = t("Mapa removido: ${map.name}.", "Map removed: ${map.name}.", "Mapa eliminado: ${map.name}.")
             refreshOfflineMaps()
         }
     }
@@ -830,12 +830,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     occurrences.forEach { repository.createOccurrence(it) }
                 }
                 val individuals = occurrences.sumOf { it.individualCount ?: 0 }
-                _message.value = t("Contagem salva: ", "Count saved: ") +
-                    qty(occurrences.size, "registro", "registros", "record", "records") + ", " +
-                    qty(individuals, "indivíduo", "indivíduos", "individual", "individuals") + "."
+                _message.value = t("Contagem salva: ", "Count saved: ", "Conteo guardado:") +
+                    qty(occurrences.size, "registro", "registros", "record", "records", "registro", "registros") + ", " +
+                    qty(individuals, "indivíduo", "indivíduos", "individual", "individuals", "individuo", "individuos") + "."
                 onSaved()
             } catch (error: SQLiteException) {
-                _message.value = saveFailureMessage(error, t("occurrenceID já existe. Use um identificador único.", "occurrenceID already exists. Use a unique identifier."))
+                _message.value = saveFailureMessage(error, t("occurrenceID já existe. Use um identificador único.", "occurrenceID already exists. Use a unique identifier.", "El occurrenceID ya existe. Usa un identificador único."))
                 onFailed()
             }
         }
@@ -866,23 +866,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         conditions: RecordingConditions = RecordingConditions()
     ) {
         if (_recording.value != null) {
-            _message.value = t("Já existe uma gravação em andamento.", "A recording is already in progress.")
+            _message.value = t("Já existe uma gravação em andamento.", "A recording is already in progress.", "Ya hay una grabación en curso.")
             return
         }
         // Gravacao anterior ainda sendo fechada: comecar outra agora disputaria
         // o microfone com ela.
         if (finishingRecordings.get() > 0) {
-            _message.value = t("Aguarde: a gravação anterior ainda está sendo salva.", "Please wait: the previous recording is still being saved.")
+            _message.value = t("Aguarde: a gravação anterior ainda está sendo salva.", "Please wait: the previous recording is still being saved.", "Espera: la grabación anterior todavía se está guardando.")
             return
         }
         val app = getApplication<Application>()
         if (ContextCompat.checkSelfPermission(app, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            _message.value = t("Permissão de áudio negada.", "Audio permission denied.")
+            _message.value = t("Permissão de áudio negada.", "Audio permission denied.", "Permiso de audio denegado.")
             return
         }
         val free = allocatableBytes(app, app.filesDir)
         if (free < MIN_RECORDING_FREE_BYTES) {
-            _message.value = t("Pouco espaço livre (${free / (1024 * 1024)} MB). Libere espaço antes de gravar: o WAV ocupa cerca de 5 MB por minuto.", "Low free space (${free / (1024 * 1024)} MB). Free up space before recording: WAV takes about 5 MB per minute.")
+            _message.value = t("Pouco espaço livre (${free / (1024 * 1024)} MB). Libere espaço antes de gravar: o WAV ocupa cerca de 5 MB por minuto.", "Low free space (${free / (1024 * 1024)} MB). Free up space before recording: WAV takes about 5 MB per minute.", "Poco espacio libre (${free / (1024 * 1024)} MB). Libera espacio antes de grabar: el WAV ocupa unos 5 MB por minuto.")
             return
         }
         val file = mediaFiles.createAudioFile(target.projectId, target.sessionId, baseName)
@@ -892,7 +892,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         started.onFailure {
             file.delete()
-            _message.value = it.message ?: t("Não foi possível iniciar a gravação de áudio.", "Could not start the audio recording.")
+            _message.value = it.message ?: t("Não foi possível iniciar a gravação de áudio.", "Could not start the audio recording.", "No se pudo iniciar la grabación de audio.")
             return
         }
         if (conditions.microphone.isNotBlank()) lastMicrophone = conditions.microphone
@@ -970,7 +970,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             val file = File(state.filePath)
             if (!file.exists() || file.length() <= 44L) {
-                _message.value = t("A gravação não produziu áudio", "The recording produced no audio") + (error?.message?.let { ": $it" } ?: ".")
+                _message.value = t("A gravação não produziu áudio", "The recording produced no audio", "La grabación no produjo audio") + (error?.message?.let { ": $it" } ?: ".")
                 file.delete()
                 return@run
             }
@@ -993,7 +993,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             if (!deliver(state.target, entity)) return@run
             // Falha no meio (disco cheio, microfone tomado) com parte gravada:
             // o audio fica, mas o pesquisador precisa saber que foi cortado.
-            _message.value = if (error != null) t("Áudio salvo, mas a gravação foi interrompida: ${why(error)}.", "Audio saved, but the recording was interrupted: ${why(error)}.") else reason ?: t("Áudio salvo.", "Audio saved.")
+            _message.value = if (error != null) t("Áudio salvo, mas a gravação foi interrompida: ${why(error)}.", "Audio saved, but the recording was interrupted: ${why(error)}.", "Audio guardado, pero la grabación se interrumpió: ${why(error)}.") else reason ?: t("Áudio salvo.", "Audio saved.", "Audio guardado.")
         }
     }
 
@@ -1046,14 +1046,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             speed = null
         )
         if (showMessage) {
-            _message.value = if (recorded != null) t("Ponto da trilha salvo.", "Track point saved.") else t("Ponto ignorado: precisão baixa ou deslocamento insuficiente.", "Point skipped: low accuracy or too little movement.")
+            _message.value = if (recorded != null) t("Ponto da trilha salvo.", "Track point saved.", "Punto del recorrido guardado.") else t("Ponto ignorado: precisão baixa ou deslocamento insuficiente.", "Point skipped: low accuracy or too little movement.", "Punto descartado: precisión baja o desplazamiento insuficiente.")
         }
         return recorded != null
     }
 
     fun startTrack(session: SessionEntity, onStarted: (Long) -> Unit = {}) {
         if (!hasLocationPermission()) {
-            _message.value = t("Permita o acesso à localização para gravar a trilha.", "Allow location access to record the track.")
+            _message.value = t("Permita o acesso à localização para gravar a trilha.", "Allow location access to record the track.", "Permite el acceso a la ubicación para grabar el recorrido.")
             return
         }
         viewModelScope.launch {
@@ -1078,7 +1078,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 )
             )
             startTrackService(id)
-            _message.value = t("Trilha GPS iniciada. A linha será atualizada em tempo real.", "GPS track started. The line will update in real time.")
+            _message.value = t("Trilha GPS iniciada. A linha será atualizada em tempo real.", "GPS track started. The line will update in real time.", "Recorrido GPS iniciado. La línea se actualiza en tiempo real.")
             onStarted(id)
         }
     }
@@ -1090,7 +1090,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             // apagava pontos e distancia somados enquanto isto rodava.
             repository.closeTrack(track.id, System.currentTimeMillis())
             if (TrackRecordingService.runningTrackId == track.id || TrackRecordingService.runningTrackId == null) stopTrackService()
-            _message.value = t("Trilha GPS encerrada.", "GPS track stopped.")
+            _message.value = t("Trilha GPS encerrada.", "GPS track stopped.", "Recorrido GPS finalizado.")
         }
     }
 
@@ -1112,11 +1112,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             // depois): retomar colaria pontos de hoje numa trilha antiga.
             if (System.currentTimeMillis() - lastActivity > RESUME_LIMIT_MILLIS || !hasLocationPermission()) {
                 repository.closeTrack(current.id)
-                _message.value = t("Uma trilha GPS que estava aberta foi encerrada no último ponto gravado.", "A GPS track that was left open was closed at its last recorded point.")
+                _message.value = t("Uma trilha GPS que estava aberta foi encerrada no último ponto gravado.", "A GPS track that was left open was closed at its last recorded point.", "Un recorrido GPS que había quedado abierto se cerró en su último punto grabado.")
                 return@launch
             }
             startTrackService(current.id)
-            _message.value = t("Trilha GPS retomada após o app ter sido fechado.", "GPS track resumed after the app was closed.")
+            _message.value = t("Trilha GPS retomada após o app ter sido fechado.", "GPS track resumed after the app was closed.", "Recorrido GPS reanudado después de que se cerró la app.")
         }
     }
 
@@ -1134,10 +1134,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val parsed = withContext(Dispatchers.IO) {
                 runCatching {
                     getApplication<Application>().contentResolver.openInputStream(uri)?.bufferedReader()?.use { TrackFileParser.parse(it.readText()) }
-                        ?: throw java.io.IOException(t("não foi possível ler o arquivo", "could not read the file"))
+                        ?: throw java.io.IOException(t("não foi possível ler o arquivo", "could not read the file", "no se pudo leer el archivo"))
                 }
             }.getOrElse {
-                _message.value = t("Não foi possível importar a trilha: ${why(it)}.", "Could not import the track: ${why(it)}.")
+                _message.value = t("Não foi possível importar a trilha: ${why(it)}.", "Could not import the track: ${why(it)}.", "No se pudo importar el recorrido: ${why(it)}.")
                 return@launch
             }
             val valid = parsed.filter { validateCoordinates(it.latitude, it.longitude) == null }
@@ -1150,7 +1150,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 valid.filterIndexed { index, point -> index == 0 || valid[index - 1].latitude != point.latitude || valid[index - 1].longitude != point.longitude }
             }
             if (points.size < 2) {
-                _message.value = t("Não foi possível importar: a trilha precisa ter pelo menos 2 pontos válidos.", "Could not import: the track needs at least 2 valid points.")
+                _message.value = t("Não foi possível importar: a trilha precisa ter pelo menos 2 pontos válidos.", "Could not import: the track needs at least 2 valid points.", "No se pudo importar: el recorrido necesita al menos 2 puntos válidos.")
                 return@launch
             }
             val start = if (timed) points.first().timestamp!! else 0L
@@ -1187,14 +1187,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }.onSuccess {
                 _message.value = buildString {
-                    append(t("Trilha importada com ${points.size} pontos.", "Track imported with ${points.size} points."))
-                    if (!timed) append(t(" O arquivo não traz horário para todos os pontos: a trilha ficou sem horário e sem duração.", " The file does not have a time for every point: the track was left without times and duration."))
+                    append(t("Trilha importada com ${points.size} pontos.", "Track imported with ${points.size} points.", "Recorrido importado con ${points.size} puntos."))
+                    if (!timed) append(t(" O arquivo não traz horário para todos os pontos: a trilha ficou sem horário e sem duração.", " The file does not have a time for every point: the track was left without times and duration.", " El archivo no trae la hora de todos los puntos: el recorrido quedó sin horas y sin duración."))
                     val skipped = parsed.size - valid.size
-                    if (skipped == 1) append(t(" 1 ponto com coordenada inválida ficou de fora.", " 1 point with an invalid coordinate was left out."))
-                    if (skipped > 1) append(t(" $skipped pontos com coordenada inválida ficaram de fora.", " $skipped points with invalid coordinates were left out."))
+                    if (skipped == 1) append(t(" 1 ponto com coordenada inválida ficou de fora.", " 1 point with an invalid coordinate was left out.", " 1 punto con coordenada no válida quedó fuera."))
+                    if (skipped > 1) append(t(" $skipped pontos com coordenada inválida ficaram de fora.", " $skipped points with invalid coordinates were left out.", " $skipped puntos con coordenadas no válidas quedaron fuera."))
                 }
             }.onFailure {
-                _message.value = t("Não foi possível importar a trilha: ${why(it)}.", "Could not import the track: ${why(it)}.")
+                _message.value = t("Não foi possível importar a trilha: ${why(it)}.", "Could not import the track: ${why(it)}.", "No se pudo importar el recorrido: ${why(it)}.")
             }
         }
     }
@@ -1210,7 +1210,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             .setAction(TrackRecordingService.ACTION_START)
             .putExtra(TrackRecordingService.EXTRA_TRACK_ID, trackId)
         runCatching { ContextCompat.startForegroundService(context, intent) }
-            .onFailure { _message.value = t("Não foi possível iniciar a trilha em segundo plano.", "Could not start the track in the background.") }
+            .onFailure { _message.value = t("Não foi possível iniciar a trilha em segundo plano.", "Could not start the track in the background.", "No se pudo iniciar el recorrido en segundo plano.") }
     }
 
     private fun stopTrackService() {
@@ -1242,7 +1242,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun captureLocation(onResult: (CapturedLocation?) -> Unit) {
         viewModelScope.launch {
             val location = locationService.currentLocation(withAddress = reverseGeocodingEnabled)
-            if (location == null) _message.value = t("Sem posição de GPS agora. Tente em local mais aberto ou digite a coordenada.", "No GPS position right now. Try a more open spot or type the coordinate.")
+            if (location == null) _message.value = t("Sem posição de GPS agora. Tente em local mais aberto ou digite a coordenada.", "No GPS position right now. Try a more open spot or type the coordinate.", "No hay posición de GPS ahora. Prueba en un lugar más abierto o escribe la coordenada.")
             onResult(location)
         }
     }
@@ -1277,7 +1277,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 repository.getFields(projectId),
                 exportTracks(projectId, session.id),
                 content,
-                com.oikos.fieldbook.util.inProjectLanguage(project.language, "expedicao_", "expedition_") +
+                com.oikos.fieldbook.util.inProjectLanguage(project.language, "expedicao_", "expedition_", "salida_") +
                     OikosExporter.safeName(session.name.ifBlank { session.eventId }),
                 destination = mediaFiles::newExportFile
             )
@@ -1294,26 +1294,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val occurrences = if (sessionId == null) repository.getOccurrences(projectId) else repository.getOccurrencesForSession(sessionId)
             val specimens = occurrences.filter { it.basisOfRecord in SpecimenLabels.specimenBases }.sortedBy { it.createdAt }
             if (specimens.isEmpty()) {
-                _message.value = t("Nenhum espécime neste escopo. As etiquetas saem para registros com natureza do registro PreservedSpecimen, MaterialSample ou LivingSpecimen.", "No specimens in this scope. Labels are made for records whose basis of record is PreservedSpecimen, MaterialSample or LivingSpecimen.")
+                _message.value = t("Nenhum espécime neste escopo. As etiquetas saem para registros com natureza do registro PreservedSpecimen, MaterialSample ou LivingSpecimen.", "No specimens in this scope. Labels are made for records whose basis of record is PreservedSpecimen, MaterialSample or LivingSpecimen.", "No hay especímenes en este alcance. Las etiquetas se generan para registros cuya base del registro es PreservedSpecimen, MaterialSample o LivingSpecimen.")
                 return@runExport null
             }
             val sessionsById = sessions.associateBy { it.id }
             val labels = specimens.map { SpecimenLabels.content(project, sessionsById[it.sessionId], it) }
             val scopeName = sessionId?.let { id -> sessionsById[id]?.let { it.name.ifBlank { it.eventId } } } ?: project.name
-            val file = mediaFiles.newExportFile(com.oikos.fieldbook.util.inProjectLanguage(project.language, "etiquetas_", "labels_") + "${OikosExporter.safeName(scopeName)}.pdf")
+            val file = mediaFiles.newExportFile(com.oikos.fieldbook.util.inProjectLanguage(project.language, "etiquetas_", "labels_", "etiquetas_") + "${OikosExporter.safeName(scopeName)}.pdf")
             val shortened = SpecimenLabelPdf.write(labels, file)
             val note = when {
-                shortened == 1 -> t(" Atenção: em 1 etiqueta o texto não coube e a descrição foi encurtada (…); confira antes de imprimir.", " Note: on 1 label the text did not fit and the description was shortened (…); check it before printing.")
-                shortened > 1 -> t(" Atenção: em $shortened etiquetas o texto não coube e a descrição foi encurtada (…); confira antes de imprimir.", " Note: on $shortened labels the text did not fit and the description was shortened (…); check them before printing.")
+                shortened == 1 -> t(" Atenção: em 1 etiqueta o texto não coube e a descrição foi encurtada (…); confira antes de imprimir.", " Note: on 1 label the text did not fit and the description was shortened (…); check it before printing.", " Atención: en 1 etiqueta el texto no cupo y la descripción se acortó (…); revísala antes de imprimir.")
+                shortened > 1 -> t(" Atenção: em $shortened etiquetas o texto não coube e a descrição foi encurtada (…); confira antes de imprimir.", " Note: on $shortened labels the text did not fit and the description was shortened (…); check them before printing.", " Atención: en $shortened etiquetas el texto no cupo y la descripción se acortó (…); revísalas antes de imprimir.")
                 else -> ""
             }
             val sheets = (labels.size + 7) / 8
             ExportResult(
                 file,
                 "application/pdf",
-                qty(labels.size, "etiqueta", "etiquetas", "label", "labels") + t(" em ", " on ") +
-                    qty(sheets, "folha A4", "folhas A4", "A4 sheet", "A4 sheets") +
-                    t(". Imprima em tamanho real (100%), sem ajustar à página.", ". Print at actual size (100%), without fitting to the page.") + note
+                qty(labels.size, "etiqueta", "etiquetas", "label", "labels", "etiqueta", "etiquetas") + t(" em ", " on ", " en") +
+                    qty(sheets, "folha A4", "folhas A4", "A4 sheet", "A4 sheets", "hoja A4", "hojas A4") +
+                    t(". Imprima em tamanho real (100%), sem ajustar à página.", ". Print at actual size (100%), without fitting to the page.", ". Imprime en tamaño real (100%), sin ajustar a la página.") + note
             )
         }
     }
@@ -1327,9 +1327,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         runExport(onReady) {
             val project = repository.getProject(projectId) ?: return@runExport null
             val scopeName = sessionId?.let { id -> repository.getSession(id)?.let { it.name.ifBlank { it.eventId } } } ?: project.name
-            val file = mediaFiles.newExportFile(com.oikos.fieldbook.util.inProjectLanguage(project.language, "pacote_", "package_") + "${OikosExporter.safeName(scopeName)}_${LocalDate.now()}.zip")
+            val file = mediaFiles.newExportFile(com.oikos.fieldbook.util.inProjectLanguage(project.language, "pacote_", "package_", "paquete_") + "${OikosExporter.safeName(scopeName)}_${LocalDate.now()}.zip")
             file.outputStream().use { transfer.export(projectId, sessionId, it, "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})") }
-            ExportResult(file, "application/zip", t("Envie o pacote ao outro celular (WhatsApp, e-mail, Drive ou cabo) e, lá, toque em Importar na tela inicial e escolha Importar de um arquivo.", "Send the package to the other phone (WhatsApp, email, Drive or cable) and, there, tap Import on the home screen and choose Import from a file."))
+            ExportResult(file, "application/zip", t("Envie o pacote ao outro celular (WhatsApp, e-mail, Drive ou cabo) e, lá, toque em Importar na tela inicial e escolha Importar de um arquivo.", "Send the package to the other phone (WhatsApp, email, Drive or cable) and, there, tap Import on the home screen and choose Import from a file.", "Envía el paquete al otro celular (WhatsApp, correo, Drive o cable) y, allí, toca Importar en la pantalla de inicio y elige Importar de un archivo."))
         }
     }
 
@@ -1342,7 +1342,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val prepared = runCatching {
                 withContext(Dispatchers.IO) {
-                    val project = repository.getProject(projectId) ?: throw java.io.IOException(t("projeto não encontrado", "project not found"))
+                    val project = repository.getProject(projectId) ?: throw java.io.IOException(t("projeto não encontrado", "project not found", "proyecto no encontrado"))
                     val sessions = if (sessionId == null) repository.getSessions(projectId) else listOfNotNull(repository.getSession(sessionId))
                     val occurrences = if (sessionId == null) repository.getOccurrences(projectId) else repository.getOccurrencesForSession(sessionId)
                     val folder = File(getApplication<Application>().cacheDir, "envios").apply { mkdirs() }
@@ -1354,14 +1354,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             prepared.onSuccess { (file, sender, projectName) -> nearby.startSending(file, sender, projectName) }
-                .onFailure { _message.value = t("Não foi possível montar o pacote: ${why(it)}", "Could not build the package: ${why(it)}") }
+                .onFailure { _message.value = t("Não foi possível montar o pacote: ${why(it)}", "Could not build the package: ${why(it)}", "No se pudo armar el paquete: ${why(it)}") }
         }
     }
 
     suspend fun inspectProjectPackage(uri: Uri): Result<TransferManifest> = withContext(Dispatchers.IO) {
         runCatching {
             getApplication<Application>().contentResolver.openInputStream(uri)?.use { transfer.readManifest(it) }
-                ?: throw java.io.IOException(t("não foi possível ler o arquivo", "could not read the file"))
+                ?: throw java.io.IOException(t("não foi possível ler o arquivo", "could not read the file", "no se pudo leer el archivo"))
         }
     }
 
@@ -1373,17 +1373,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (importing) return
         importing = true
         viewModelScope.launch {
-            _message.value = t("Importando o pacote...", "Importing the package...")
+            _message.value = t("Importando o pacote...", "Importing the package...", "Importando el paquete...")
             runCatching {
                 withContext(Dispatchers.IO) {
                     getApplication<Application>().contentResolver.openInputStream(uri)?.use { transfer.import(it, targetProjectId, takeIncoming) }
-                        ?: throw java.io.IOException(t("não foi possível ler o arquivo", "could not read the file"))
+                        ?: throw java.io.IOException(t("não foi possível ler o arquivo", "could not read the file", "no se pudo leer el archivo"))
                 }
             }.onSuccess { result ->
                 _message.value = importSummary(result)
                 onDone(result.projectId)
             }.onFailure {
-                _message.value = t("Não foi possível importar: ${why(it)}. Nada foi alterado.", "Could not import: ${why(it)}. Nothing was changed.")
+                _message.value = t("Não foi possível importar: ${why(it)}. Nada foi alterado.", "Could not import: ${why(it)}. Nothing was changed.", "No se pudo importar: ${why(it)}. No se modificó nada.")
             }
             // Pacote recebido de celular proximo fica no cache so ate ser importado.
             cleanup?.delete()
@@ -1392,23 +1392,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun importSummary(result: com.oikos.fieldbook.services.TransferSummary): String = buildString {
-        append(t("Importado: ", "Imported: "))
-        append(qty(result.occurrencesAdded, "ocorrência", "ocorrências", "occurrence", "occurrences")).append(", ")
-        append(qty(result.mediaAdded, "mídia", "mídias", "media file", "media files")).append(", ")
-        append(qty(result.sessionsAdded, "expedição nova", "expedições novas", "new expedition", "new expeditions"))
-        if (result.tracksAdded > 0) append(", ").append(qty(result.tracksAdded, "trilha", "trilhas", "track", "tracks"))
+        append(t("Importado: ", "Imported: ", "Importado:"))
+        append(qty(result.occurrencesAdded, "ocorrência", "ocorrências", "occurrence", "occurrences", "registro", "registros")).append(", ")
+        append(qty(result.mediaAdded, "mídia", "mídias", "media file", "media files", "archivo multimedia", "archivos multimedia")).append(", ")
+        append(qty(result.sessionsAdded, "expedição nova", "expedições novas", "new expedition", "new expeditions", "salida de campo nueva", "salidas de campo nuevas"))
+        if (result.tracksAdded > 0) append(", ").append(qty(result.tracksAdded, "trilha", "trilhas", "track", "tracks", "recorrido", "recorridos"))
         append(".")
         val merged = result.sessionsMerged
         if (merged > 0) {
             append(
-                if (merged == 1) t(" 1 expedição já existia e recebeu as novidades", " 1 expedition already existed and received the new data")
-                else t(" $merged expedições já existiam e receberam as novidades", " $merged expeditions already existed and received the new data")
+                if (merged == 1) t(" 1 expedição já existia e recebeu as novidades", " 1 expedition already existed and received the new data", " 1 salida de campo ya existía y recibió los datos nuevos")
+                else t(" $merged expedições já existiam e receberam as novidades", " $merged expeditions already existed and received the new data", " $merged salidas de campo ya existían y recibieron los datos nuevos")
             )
             val elsewhere = result.sessionsInOtherProject
             if (elsewhere > 0) {
                 append(
-                    if (elsewhere == 1) t(" (1 em outro projeto, onde ficou)", " (1 in another project, where it stayed)")
-                    else t(" ($elsewhere em outro projeto, onde ficaram)", " ($elsewhere in another project, where they stayed)")
+                    if (elsewhere == 1) t(" (1 em outro projeto, onde ficou)", " (1 in another project, where it stayed)", " (1 en otro proyecto, donde se quedó)")
+                    else t(" ($elsewhere em outro projeto, onde ficaram)", " ($elsewhere in another project, where they stayed)", " ($elsewhere en otro proyecto, donde se quedaron)")
                 )
             }
             append(".")
@@ -1416,24 +1416,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val skipped = result.occurrencesSkipped
         if (skipped > 0) {
             append(
-                if (skipped == 1) t(" 1 ocorrência já existia e não foi duplicada", " 1 occurrence already existed and was not duplicated")
-                else t(" $skipped ocorrências já existiam e não foram duplicadas", " $skipped occurrences already existed and were not duplicated")
+                if (skipped == 1) t(" 1 ocorrência já existia e não foi duplicada", " 1 occurrence already existed and was not duplicated", " 1 registro ya existía y no se duplicó")
+                else t(" $skipped ocorrências já existiam e não foram duplicadas", " $skipped occurrences already existed and were not duplicated", " $skipped registros ya existían y no se duplicaron")
             )
             append(".")
         }
         // Registros editados nos dois celulares em que o pesquisador escolheu a versao que chegou.
         val replaced = result.sessionsReplaced + result.occurrencesReplaced
         if (replaced > 0) {
-            append(" ").append(qty(replaced, "registro ficou", "registros ficaram", "record now has", "records now have"))
-            append(t(" com a versão do outro celular, como você escolheu.", " the other phone's version, as you chose."))
+            append(" ").append(qty(replaced, "registro ficou", "registros ficaram", "record now has", "records now have", "registro quedó", "registros quedaron"))
+            append(t(" com a versão do outro celular, como você escolheu.", " the other phone's version, as you chose.", " con la versión del otro celular, como elegiste."))
         }
         if (result.tracksExtended > 0) {
-            append(" ").append(qty(result.tracksExtended, "trilha recebeu", "trilhas receberam", "track received", "tracks received"))
-            append(" ").append(qty(result.trackPointsAdded, "ponto que faltava", "pontos que faltavam", "missing point", "missing points")).append(".")
+            append(" ").append(qty(result.tracksExtended, "trilha recebeu", "trilhas receberam", "track received", "tracks received", "recorrido recibió", "recorridos recibieron"))
+            append(" ").append(qty(result.trackPointsAdded, "ponto que faltava", "pontos que faltavam", "missing point", "missing points", "punto que faltaba", "puntos que faltaban")).append(".")
         }
         val withoutFile = result.mediaWithoutFile
-        if (withoutFile == 1) append(t(" Atenção: 1 mídia ficou sem o arquivo (faltava no pacote ou não houve espaço para copiá-lo).", " Note: 1 media file is missing (it was not in the package or there was no space to copy it)."))
-        if (withoutFile > 1) append(t(" Atenção: $withoutFile mídias ficaram sem o arquivo (faltava no pacote ou não houve espaço para copiá-los).", " Note: $withoutFile media files are missing (they were not in the package or there was no space to copy them)."))
+        if (withoutFile == 1) append(t(" Atenção: 1 mídia ficou sem o arquivo (faltava no pacote ou não houve espaço para copiá-lo).", " Note: 1 media file is missing (it was not in the package or there was no space to copy it).", " Atención: 1 archivo multimedia quedó sin su archivo (faltaba en el paquete o no hubo espacio para copiarlo)."))
+        if (withoutFile > 1) append(t(" Atenção: $withoutFile mídias ficaram sem o arquivo (faltava no pacote ou não houve espaço para copiá-los).", " Note: $withoutFile media files are missing (they were not in the package or there was no space to copy them).", " Atención: $withoutFile archivos multimedia quedaron sin su archivo (faltaban en el paquete o no hubo espacio para copiarlos)."))
     }
 
     /** Exportacao fora da main thread, com estado de andamento e sem execucao dupla. */
@@ -1446,7 +1446,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 result.onSuccess { exported ->
                     if (exported != null) onReady(shareIntent(exported.file, exported.mimeType), exported.warning)
                 }.onFailure {
-                    _message.value = t("A exportação falhou: ${why(it)}. Libere espaço e tente de novo.", "The export failed: ${why(it)}. Free up space and try again.")
+                    _message.value = t("A exportação falhou: ${why(it)}. Libere espaço e tente de novo.", "The export failed: ${why(it)}. Free up space and try again.", "La exportación falló: ${why(it)}. Libera espacio e inténtalo de nuevo.")
                 }
             } finally {
                 _exporting.value = false
@@ -1474,8 +1474,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun validateCoordinates(latitude: Double?, longitude: Double?): String? = when {
-        !CoordinateUtils.validLatitude(latitude) -> t("Latitude deve estar entre -90 e 90.", "Latitude must be between -90 and 90.")
-        !CoordinateUtils.validLongitude(longitude) -> t("Longitude deve estar entre -180 e 180.", "Longitude must be between -180 and 180.")
+        !CoordinateUtils.validLatitude(latitude) -> t("Latitude deve estar entre -90 e 90.", "Latitude must be between -90 and 90.", "La latitud debe estar entre -90 y 90.")
+        !CoordinateUtils.validLongitude(longitude) -> t("Longitude deve estar entre -180 e 180.", "Longitude must be between -180 and 180.", "La longitud debe estar entre -180 y 180.")
         else -> null
     }
 

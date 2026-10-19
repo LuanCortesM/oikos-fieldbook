@@ -73,9 +73,9 @@ class MediaFileService(private val context: Context) {
         val dir = mediaDir(projectId, sessionId, type)
         val staging = uniqueFile(dir, base, "importando")
         try {
-            val input = context.contentResolver.openInputStream(uri) ?: throw java.io.IOException(UiLanguage.t("o outro app não entregou o arquivo", "the other app did not deliver the file"))
+            val input = context.contentResolver.openInputStream(uri) ?: throw java.io.IOException(UiLanguage.t("o outro app não entregou o arquivo", "the other app did not deliver the file", "la otra app no entregó el archivo"))
             input.use { source -> FileOutputStream(staging).use { output -> source.copyTo(output) } }
-            if (staging.length() == 0L) throw java.io.IOException(UiLanguage.t("o arquivo escolhido está vazio", "the chosen file is empty"))
+            if (staging.length() == 0L) throw java.io.IOException(UiLanguage.t("o arquivo escolhido está vazio", "the chosen file is empty", "el archivo elegido está vacío"))
             val detected = MediaKind.detect(staging)
             val mime = detected?.mime ?: mimeType?.takeIf { it.isNotBlank() && it != "application/octet-stream" }
                 ?: if (type == "audio") "audio/*" else "image/*"

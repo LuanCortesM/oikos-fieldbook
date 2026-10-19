@@ -211,9 +211,9 @@ class NearbyTransfer(context: Context) {
                     }
                 }
                 ConnectionsStatusCodes.STATUS_CONNECTION_REJECTED ->
-                    if (role == Role.SENDER) fail(UiLanguage.t("o outro celular recusou o envio", "the other phone declined the transfer"))
+                    if (role == Role.SENDER) fail(UiLanguage.t("o outro celular recusou o envio", "the other phone declined the transfer", "el otro celular rechazó el envío"))
                     else _state.value = State.Waiting(myName)
-                else -> fail(UiLanguage.t("não foi possível conectar (${resolution.status.statusCode})", "could not connect (${resolution.status.statusCode})"))
+                else -> fail(UiLanguage.t("não foi possível conectar (${resolution.status.statusCode})", "could not connect (${resolution.status.statusCode})", "no se pudo conectar (${resolution.status.statusCode})"))
             }
         }
 
@@ -221,9 +221,9 @@ class NearbyTransfer(context: Context) {
             if (finished) return
             when (val current = _state.value) {
                 is State.Sent, is State.Received, is State.Failed, is State.Idle -> Unit
-                is State.Confirming -> fail(UiLanguage.t("a conexão caiu antes da confirmação; confira no outro celular se o pacote chegou", "the connection dropped before the confirmation; check on the other phone whether the package arrived"))
+                is State.Confirming -> fail(UiLanguage.t("a conexão caiu antes da confirmação; confira no outro celular se o pacote chegou", "the connection dropped before the confirmation; check on the other phone whether the package arrived", "la conexión se cayó antes de la confirmación; revisa en el otro celular si el paquete llegó"))
                 else -> if (current !is State.Waiting && current !is State.Searching) {
-                    fail(UiLanguage.t("a conexão caiu. Aproximem os celulares e tentem de novo", "the connection dropped. Bring the phones closer and try again"))
+                    fail(UiLanguage.t("a conexão caiu. Aproximem os celulares e tentem de novo", "the connection dropped. Bring the phones closer and try again", "la conexión se cayó. Acerquen los celulares e inténtenlo de nuevo"))
                 }
             }
         }
@@ -238,15 +238,15 @@ class NearbyTransfer(context: Context) {
                         incomingHeader = json
                         val size = json.optLong("size")
                         if (appContext.cacheDir.usableSpace < size + FREE_SPACE_MARGIN) {
-                            reply(endpointId, false, UiLanguage.t("o celular que recebe está sem espaço", "the receiving phone is out of space"))
-                            fail(UiLanguage.t("sem espaço para receber o pacote (${size / (1024 * 1024)} MB)", "not enough space to receive the package (${size / (1024 * 1024)} MB)"))
+                            reply(endpointId, false, UiLanguage.t("o celular que recebe está sem espaço", "the receiving phone is out of space", "el celular que recibe no tiene espacio"))
+                            fail(UiLanguage.t("sem espaço para receber o pacote (${size / (1024 * 1024)} MB)", "not enough space to receive the package (${size / (1024 * 1024)} MB)", "no hay espacio para recibir el paquete (${size / (1024 * 1024)} MB)"))
                         } else {
                             _state.value = State.Transferring(peerName, 0, size)
                         }
                     } else if (role == Role.SENDER && json.has("ok")) {
                         finished = true
                         if (json.optBoolean("ok")) _state.value = State.Sent(peerName)
-                        else fail(json.optString("error").ifBlank { UiLanguage.t("o outro celular não conseguiu receber o pacote", "the other phone could not receive the package") })
+                        else fail(json.optString("error").ifBlank { UiLanguage.t("o outro celular não conseguiu receber o pacote", "the other phone could not receive the package", "el otro celular no pudo recibir el paquete") })
                         runCatching { client.disconnectFromEndpoint(endpointId) }
                     }
                 }
@@ -267,14 +267,14 @@ class NearbyTransfer(context: Context) {
                 PayloadTransferUpdate.Status.SUCCESS ->
                     if (role == Role.SENDER && update.payloadId == streamPayloadId) _state.value = State.Confirming(peerName)
                 PayloadTransferUpdate.Status.FAILURE, PayloadTransferUpdate.Status.CANCELED ->
-                    if (!finished) fail(UiLanguage.t("o envio foi interrompido. Aproximem os celulares e tentem de novo", "the transfer was interrupted. Bring the phones closer and try again"))
+                    if (!finished) fail(UiLanguage.t("o envio foi interrompido. Aproximem os celulares e tentem de novo", "the transfer was interrupted. Bring the phones closer and try again", "el envío se interrumpió. Acerquen los celulares e inténtenlo de nuevo"))
             }
         }
     }
 
     private fun send(endpointId: String) {
-        val file = outgoing ?: return fail(UiLanguage.t("pacote não encontrado", "package not found"))
-        val header = outgoingHeader ?: return fail(UiLanguage.t("pacote não encontrado", "package not found"))
+        val file = outgoing ?: return fail(UiLanguage.t("pacote não encontrado", "package not found", "paquete no encontrado"))
+        val header = outgoingHeader ?: return fail(UiLanguage.t("pacote não encontrado", "package not found", "paquete no encontrado"))
         client.sendPayload(endpointId, Payload.fromBytes(header.toString().toByteArray(Charsets.UTF_8))).addOnFailureListener { fail(it) }
         val stream = Payload.fromStream(FileInputStream(file))
         streamPayloadId = stream.id
@@ -310,7 +310,7 @@ class NearbyTransfer(context: Context) {
                 val expectedSha = header?.optString("sha256").orEmpty()
                 val sha = digest.digest().joinToString("") { "%02x".format(it) }
                 if (header == null || count != expectedSize || sha != expectedSha) {
-                    throw java.io.IOException(UiLanguage.t("o pacote chegou incompleto", "the package arrived incomplete"))
+                    throw java.io.IOException(UiLanguage.t("o pacote chegou incompleto", "the package arrived incomplete", "el paquete llegó incompleto"))
                 }
             }
             if (result.isSuccess) {
@@ -320,7 +320,7 @@ class NearbyTransfer(context: Context) {
             } else {
                 target.delete()
                 reply(endpointId, false, result.exceptionOrNull()?.message.orEmpty())
-                fail(result.exceptionOrNull()?.message ?: UiLanguage.t("o pacote chegou incompleto", "the package arrived incomplete"))
+                fail(result.exceptionOrNull()?.message ?: UiLanguage.t("o pacote chegou incompleto", "the package arrived incomplete", "el paquete llegó incompleto"))
             }
         }
     }
@@ -339,11 +339,11 @@ class NearbyTransfer(context: Context) {
                 ConnectionsStatusCodes.MISSING_PERMISSION_BLUETOOTH, ConnectionsStatusCodes.MISSING_PERMISSION_BLUETOOTH_ADMIN,
                 ConnectionsStatusCodes.MISSING_PERMISSION_ACCESS_WIFI_STATE, ConnectionsStatusCodes.MISSING_PERMISSION_CHANGE_WIFI_STATE,
                 ConnectionsStatusCodes.MISSING_PERMISSION_ACCESS_COARSE_LOCATION ->
-                    UiLanguage.t("falta permissão de dispositivos próximos ou de localização ($code)", "the nearby devices or location permission is missing ($code)")
+                    UiLanguage.t("falta permissão de dispositivos próximos ou de localização ($code)", "the nearby devices or location permission is missing ($code)", "falta el permiso de dispositivos cercanos o de ubicación ($code)")
                 ConnectionsStatusCodes.STATUS_BLUETOOTH_ERROR, ConnectionsStatusCodes.STATUS_RADIO_ERROR ->
-                    UiLanguage.t("ligue o Bluetooth e o Wi-Fi (não precisa de internet) e tente de novo", "turn on Bluetooth and Wi-Fi (no internet needed) and try again")
+                    UiLanguage.t("ligue o Bluetooth e o Wi-Fi (não precisa de internet) e tente de novo", "turn on Bluetooth and Wi-Fi (no internet needed) and try again", "activa el Bluetooth y el Wi-Fi (no hace falta internet) e inténtalo de nuevo")
                 ConnectionsStatusCodes.STATUS_ENDPOINT_UNKNOWN ->
-                    UiLanguage.t("o outro celular saiu de alcance", "the other phone is out of range")
+                    UiLanguage.t("o outro celular saiu de alcance", "the other phone is out of range", "el otro celular quedó fuera de alcance")
                 else -> error.message ?: error.toString()
             }
         )

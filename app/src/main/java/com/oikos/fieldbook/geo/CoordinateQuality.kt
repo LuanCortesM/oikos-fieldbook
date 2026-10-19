@@ -74,20 +74,20 @@ object CoordinateQuality {
     ): Report {
         val issues = mutableListOf<Issue>()
         if (latitude == 0.0 && longitude == 0.0) {
-            issues += Issue(Level.ERROR, UiLanguage.t("Coordenada 0, 0 (no mar, no Golfo da Guiné): quase sempre é campo vazio ou erro de digitação.", "Coordinate 0, 0 (at sea, in the Gulf of Guinea): almost always an empty field or a typo."))
+            issues += Issue(Level.ERROR, UiLanguage.t("Coordenada 0, 0 (no mar, no Golfo da Guiné): quase sempre é campo vazio ou erro de digitação.", "Coordinate 0, 0 (at sea, in the Gulf of Guinea): almost always an empty field or a typo.", "Coordenada 0, 0 (en el mar, en el golfo de Guinea): casi siempre es un campo vacío o un error de escritura."))
             return Report(place, issues)
         }
         if (latitude == latitude.roundToInt().toDouble() || longitude == longitude.roundToInt().toDouble()) {
-            issues += Issue(Level.WARNING, UiLanguage.t("Coordenada sem casas decimais: parece arredondada. Um grau tem cerca de 111 km.", "Coordinate without decimals: it looks rounded. One degree is about 111 km."))
+            issues += Issue(Level.WARNING, UiLanguage.t("Coordenada sem casas decimais: parece arredondada. Um grau tem cerca de 111 km.", "Coordinate without decimals: it looks rounded. One degree is about 111 km.", "Coordenada sin decimales: parece redondeada. Un grado equivale a unos 111 km."))
         }
         if (place == null) return Report(null, issues)
         val inside = place.municipality
         if (inside == null) {
             val alternatives = listOf(
-                UiLanguage.t("com a latitude de sinal trocado (N/S)", "with the latitude sign flipped (N/S)") to (-latitude to longitude),
-                UiLanguage.t("com a longitude de sinal trocado (L/O)", "with the longitude sign flipped (E/W)") to (latitude to -longitude),
-                UiLanguage.t("com os dois sinais trocados", "with both signs flipped") to (-latitude to -longitude),
-                UiLanguage.t("com latitude e longitude invertidas", "with latitude and longitude swapped") to (longitude to latitude)
+                UiLanguage.t("com a latitude de sinal trocado (N/S)", "with the latitude sign flipped (N/S)", "con el signo de la latitud invertido (N/S)") to (-latitude to longitude),
+                UiLanguage.t("com a longitude de sinal trocado (L/O)", "with the longitude sign flipped (E/W)", "con el signo de la longitud invertido (E/O)") to (latitude to -longitude),
+                UiLanguage.t("com os dois sinais trocados", "with both signs flipped", "con los dos signos invertidos") to (-latitude to -longitude),
+                UiLanguage.t("com latitude e longitude invertidas", "with latitude and longitude swapped", "con la latitud y la longitud intercambiadas") to (longitude to latitude)
             )
             val fix = alternatives.firstNotNullOfOrNull { (description, point) ->
                 if (abs(point.first) <= 90 && abs(point.second) <= 180) locate(point.first, point.second)?.let { description to it } else null
@@ -97,17 +97,17 @@ object CoordinateQuality {
                     Level.WARNING,
                     UiLanguage.t(
                         "Fora da malha municipal, a ${distanceText(place.nearestDistanceMeters)} de ${place.nearest.label}: mar, ilha pequena ou outro país? Confira.",
-                        "Outside the municipal map, ${distanceText(place.nearestDistanceMeters)} from ${place.nearest.label}: sea, small island or another country? Check it."
+                        "Outside the municipal map, ${distanceText(place.nearestDistanceMeters)} from ${place.nearest.label}: sea, small island or another country? Check it.", "Fuera del mapa de municipios, a ${distanceText(place.nearestDistanceMeters)} de ${place.nearest.label}: ¿mar, isla pequeña u otro país? Revísalo."
                     )
                 )
                 fix != null -> issues += Issue(
                     Level.ERROR,
                     UiLanguage.t(
                         "Fora do Brasil. ${fix.first.replaceFirstChar { it.uppercase() }} cairia em ${fix.second.label}: confira.",
-                        "Outside Brazil. ${fix.first.replaceFirstChar { it.uppercase() }} it would fall in ${fix.second.label}: check it."
+                        "Outside Brazil. ${fix.first.replaceFirstChar { it.uppercase() }} it would fall in ${fix.second.label}: check it.", "Fuera de Brasil. ${fix.first.replaceFirstChar { it.uppercase() }} caería en ${fix.second.label}: revísalo."
                     )
                 )
-                else -> issues += Issue(Level.INFO, UiLanguage.t("Fora do Brasil: o app só confere municípios brasileiros.", "Outside Brazil: the app only checks Brazilian municipalities."))
+                else -> issues += Issue(Level.INFO, UiLanguage.t("Fora do Brasil: o app só confere municípios brasileiros.", "Outside Brazil: the app only checks Brazilian municipalities.", "Fuera de Brasil: la app solo verifica municipios brasileños."))
             }
             return Report(place, issues)
         }
@@ -116,15 +116,15 @@ object CoordinateQuality {
                 Level.WARNING,
                 UiLanguage.t(
                     "A ${distanceText(place.nearestDistanceMeters)} da divisa com ${place.nearest.label}: confira o município.",
-                    "${distanceText(place.nearestDistanceMeters)} from the border with ${place.nearest.label}: check the municipality."
+                    "${distanceText(place.nearestDistanceMeters)} from the border with ${place.nearest.label}: check the municipality.", "A ${distanceText(place.nearestDistanceMeters)} del límite con ${place.nearest.label}: revisa el municipio."
                 )
             )
         }
         val declared = ufCode(declaredUf)
         if (declared != null && declared != inside.uf) {
-            issues += Issue(Level.WARNING, UiLanguage.t("A expedição está em $declaredUf, mas o ponto cai em ${inside.label}.", "The expedition is in $declaredUf, but the point falls in ${inside.label}."))
+            issues += Issue(Level.WARNING, UiLanguage.t("A expedição está em $declaredUf, mas o ponto cai em ${inside.label}.", "The expedition is in $declaredUf, but the point falls in ${inside.label}.", "La salida de campo está en $declaredUf, pero el punto cae en ${inside.label}."))
         } else if (declaredMunicipality.isNotBlank() && normalize(declaredMunicipality) != normalize(inside.name)) {
-            issues += Issue(Level.WARNING, UiLanguage.t("A expedição está em $declaredMunicipality, mas o ponto cai em ${inside.label}.", "The expedition is in $declaredMunicipality, but the point falls in ${inside.label}."))
+            issues += Issue(Level.WARNING, UiLanguage.t("A expedição está em $declaredMunicipality, mas o ponto cai em ${inside.label}.", "The expedition is in $declaredMunicipality, but the point falls in ${inside.label}.", "La salida de campo está en $declaredMunicipality, pero el punto cae en ${inside.label}."))
         }
         return Report(place, issues)
     }
@@ -132,6 +132,6 @@ object CoordinateQuality {
     private fun distanceText(meters: Double?): String = when {
         meters == null -> "?"
         meters < 1000 -> "${(meters / 10).roundToInt() * 10} m"
-        else -> String.format(if (UiLanguage.isPortuguese) Locale.forLanguageTag("pt-BR") else Locale.US, "%.1f km", meters / 1000)
+        else -> String.format(UiLanguage.current.locale, "%.1f km", meters / 1000)
     }
 }

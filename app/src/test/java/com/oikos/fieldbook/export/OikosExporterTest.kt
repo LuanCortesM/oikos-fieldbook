@@ -237,6 +237,73 @@ class OikosExporterTest {
         assertTrue(zip.getValue("Project_anuros_da_serra/manifest.json").contains("05_media/audios/"))
     }
 
+    @Test
+    fun projetoEmEspanholExportaPastasLeiaMeEMetadadosEmEspanhol() {
+        val audio = folder.newFile("c.wav").apply { writeBytes("RIFF".toByteArray() + ByteArray(4) + "WAVE".toByteArray()) }
+        val media = MediaEntity(
+            id = 9, projectId = 1, sessionId = 1, occurrenceId = 1, mediaType = "audio", filePath = audio.path, fileName = "c.wav",
+            mimeType = "audio/wav", createdAt = 1_800_000_000_000L
+        )
+        val spanish = project.copy(language = "es")
+        val zip = readZip(OikosExporter("9.9.9").export(
+            format = ExportFormat.Zip, project = spanish, sessions = listOf(session), occurrences = listOf(occurrence(1)),
+            media = listOf(media), fields = emptyList()
+        ) { name -> File(folder.root, "es_$name") }.file)
+        val keys = zip.keys.toString()
+        assertTrue(keys, zip.keys.all { it.startsWith("Proyecto_anuros_da_serra/") })
+        assertTrue(keys, zip.keys.any { it.endsWith("/COMO_CITAR.txt") })
+        assertTrue(keys, zip.keys.any { it.endsWith("/01_planilla_principal/registros_darwin_core.csv") })
+        assertTrue(keys, zip.keys.any { it.endsWith("/02_tablas_de_apoyo/multimedia.csv") })
+        assertTrue(keys, zip.keys.any { it.contains("/05_multimedia/audios/") })
+        assertTrue(keys, zip.keys.none { it.contains("midias") || it.contains("planilha") || it.endsWith("/media.csv") })
+        val readme = zip.entries.first { it.key.endsWith("/README.txt") }.value
+        assertTrue(readme, readme.startsWith("Oikos FieldBook - Exportación completa") && readme.contains("Proyecto: "))
+        val citation = zip.entries.first { it.key.endsWith("/COMO_CITAR.txt") }.value
+        assertTrue(citation, citation.startsWith("Cómo citar Oikos FieldBook") && citation.contains("APA"))
+        val eml = readZip(OikosExporter("9.9.9").export(
+            format = ExportFormat.DwcArchive, project = spanish, sessions = listOf(session), occurrences = listOf(occurrence(1)),
+            media = emptyList(), fields = emptyList()
+        ) { name -> File(folder.root, "es_d_$name") }.file).getValue("eml.xml")
+        assertTrue(eml, eml.contains("<language>spa</language>"))
+        assertTrue(eml, eml.contains("Datos registrados con la app Oikos FieldBook, versión 9.9.9. Maciel"))
+    }
+
+    /**
+     * GBIF, SiBBr e speciesLink leem o Darwin Core pelo nome das colunas e pelos
+     * valores dos vocabularios: o idioma do projeto so pode mudar texto livre
+     * (observacoes, metadados), nunca a estrutura do pacote.
+     */
+    @Test
+    fun idiomaDoProjetoNaoMudaColunasNemVocabulariosDoDarwinCore() {
+        val record = occurrence(1) {
+            copy(
+                basisOfRecord = "PreservedSpecimen", occurrenceStatus = "present", sex = "female", lifeStage = "adult",
+                individualCount = 2, latitude = -22.5, longitude = -45.0
+            )
+        }
+        fun archive(language: String): Map<String, String> = readZip(OikosExporter("9.9.9").export(
+            format = ExportFormat.DwcArchive, project = project.copy(language = language), sessions = listOf(session),
+            occurrences = listOf(record), media = emptyList(), fields = emptyList()
+        ) { name -> File(folder.root, "lang_${language}_$name") }.file)
+        fun rows(text: String): List<Map<String, String>> {
+            val lines = text.lines().filter { it.isNotEmpty() }
+            val headers = lines.first().split('\t')
+            return lines.drop(1).map { headers.zip(it.split('\t')).toMap() }
+        }
+        val pt = archive("pt")
+        listOf("en", "es").forEach { language ->
+            val other = archive(language)
+            assertEquals(language, pt.keys, other.keys)
+            assertEquals(language, pt.getValue("meta.xml"), other.getValue("meta.xml"))
+            val a = rows(pt.getValue("occurrence.txt")).single()
+            val b = rows(other.getValue("occurrence.txt")).single()
+            assertEquals(language, a.keys.toList(), b.keys.toList())
+            listOf("basisOfRecord", "occurrenceStatus", "sex", "lifeStage", "individualCount", "decimalLatitude", "decimalLongitude", "eventDate", "occurrenceID")
+                .forEach { term -> assertEquals("$language $term", a[term], b[term]) }
+        }
+        assertTrue(archive("es").getValue("eml.xml").contains("<language>spa</language>"))
+    }
+
     private fun readZip(file: File): Map<String, String> {
         val result = mutableMapOf<String, String>()
         ZipInputStream(file.inputStream()).use { zip ->

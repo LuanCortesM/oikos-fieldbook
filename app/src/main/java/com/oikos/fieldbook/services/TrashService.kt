@@ -101,7 +101,7 @@ class TrashService(private val database: OikosDatabase, private val filesDir: Fi
         var dir = File(root, "$deletedAt-$kind")
         var suffix = 2
         while (!dir.mkdir()) {
-            if (!root.isDirectory || suffix > 1000) throw IOException(UiLanguage.t("não foi possível criar a pasta da lixeira", "could not create the trash folder"))
+            if (!root.isDirectory || suffix > 1000) throw IOException(UiLanguage.t("não foi possível criar a pasta da lixeira", "could not create the trash folder", "no se pudo crear la carpeta de la papelera"))
             dir = File(root, "$deletedAt-$kind-$suffix")
             suffix++
         }
@@ -193,10 +193,10 @@ class TrashService(private val database: OikosDatabase, private val filesDir: Fi
             throw IOException(
                 when {
                     "UNIQUE" in text || "PRIMARY KEY" in text ->
-                        UiLanguage.t("já existe no aparelho um registro com o mesmo identificador (por exemplo, depois de restaurar um backup). Nada foi alterado.", "a record with the same identifier already exists on this device (for example, after restoring a backup). Nothing was changed.")
-                    item.kind == "occurrence" || item.kind == "media" -> UiLanguage.t("a expedição deste item não existe mais. Restaure a expedição (ou o projeto) primeiro.", "this item's expedition no longer exists. Restore the expedition (or the project) first.")
-                    item.kind == "session" -> UiLanguage.t("o projeto desta expedição não existe mais. Restaure o projeto primeiro.", "this expedition's project no longer exists. Restore the project first.")
-                    else -> UiLanguage.t("o banco recusou a restauração (${error.message}). Nada foi alterado.", "the database refused the restore (${error.message}). Nothing was changed.")
+                        UiLanguage.t("já existe no aparelho um registro com o mesmo identificador (por exemplo, depois de restaurar um backup). Nada foi alterado.", "a record with the same identifier already exists on this device (for example, after restoring a backup). Nothing was changed.", "ya existe en el dispositivo un registro con el mismo identificador (por ejemplo, después de restaurar una copia de seguridad). No se modificó nada.")
+                    item.kind == "occurrence" || item.kind == "media" -> UiLanguage.t("a expedição deste item não existe mais. Restaure a expedição (ou o projeto) primeiro.", "this item's expedition no longer exists. Restore the expedition (or the project) first.", "la salida de campo de este elemento ya no existe. Restaura primero la salida de campo (o el proyecto).")
+                    item.kind == "session" -> UiLanguage.t("o projeto desta expedição não existe mais. Restaure o projeto primeiro.", "this expedition's project no longer exists. Restore the project first.", "el proyecto de esta salida de campo ya no existe. Restaura primero el proyecto.")
+                    else -> UiLanguage.t("o banco recusou a restauração (${error.message}). Nada foi alterado.", "the database refused the restore (${error.message}). Nothing was changed.", "la base de datos rechazó la restauración (${error.message}). No se modificó nada.")
                 },
                 error
             )
@@ -256,19 +256,19 @@ class TrashService(private val database: OikosDatabase, private val filesDir: Fi
             if (current == null) {
                 throw IOException(
                     when (table) {
-                        "projects" -> UiLanguage.t("o projeto deste item não existe mais. Restaure o projeto primeiro.", "this item's project no longer exists. Restore the project first.")
-                        "sessions" -> UiLanguage.t("a expedição deste item não existe mais. Restaure a expedição (ou o projeto) primeiro.", "this item's expedition no longer exists. Restore the expedition (or the project) first.")
-                        else -> UiLanguage.t("a ocorrência desta mídia não existe mais. Restaure a ocorrência primeiro.", "this media file's occurrence no longer exists. Restore the occurrence first.")
+                        "projects" -> UiLanguage.t("o projeto deste item não existe mais. Restaure o projeto primeiro.", "this item's project no longer exists. Restore the project first.", "el proyecto de este elemento ya no existe. Restaura primero el proyecto.")
+                        "sessions" -> UiLanguage.t("a expedição deste item não existe mais. Restaure a expedição (ou o projeto) primeiro.", "this item's expedition no longer exists. Restore the expedition (or the project) first.", "la salida de campo de este elemento ya no existe. Restaura primero la salida de campo (o el proyecto).")
+                        else -> UiLanguage.t("a ocorrência desta mídia não existe mais. Restaure a ocorrência primeiro.", "this media file's occurrence no longer exists. Restore the occurrence first.", "el registro de este archivo multimedia ya no existe. Restaura primero el registro.")
                     }
                 )
             }
             if (current != parent.getString("value")) {
                 val what = when (table) {
-                    "projects" -> UiLanguage.t("o projeto deste item agora é outro", "this item's project is now a different one")
-                    "sessions" -> UiLanguage.t("a expedição deste item agora é outra", "this item's expedition is now a different one")
-                    else -> UiLanguage.t("a ocorrência desta mídia agora é outra", "this media file's occurrence is now a different one")
+                    "projects" -> UiLanguage.t("o projeto deste item agora é outro", "this item's project is now a different one", "el proyecto de este elemento ahora es otro")
+                    "sessions" -> UiLanguage.t("a expedição deste item agora é outra", "this item's expedition is now a different one", "la salida de campo de este elemento ahora es otra")
+                    else -> UiLanguage.t("a ocorrência desta mídia agora é outra", "this media file's occurrence is now a different one", "el registro de este archivo multimedia ahora es otro")
                 }
-                throw IOException(UiLanguage.t("$what (por exemplo, depois de restaurar um backup); restaurar prenderia o item ao registro errado. Nada foi alterado.", "$what (for example, after restoring a backup); restoring would attach the item to the wrong record. Nothing was changed."))
+                throw IOException(UiLanguage.t("$what (por exemplo, depois de restaurar um backup); restaurar prenderia o item ao registro errado. Nada foi alterado.", "$what (for example, after restoring a backup); restoring would attach the item to the wrong record. Nothing was changed.", "$what (por ejemplo, después de restaurar una copia de seguridad); restaurar uniría el elemento al registro equivocado. No se modificó nada."))
             }
         }
     }

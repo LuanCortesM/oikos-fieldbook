@@ -255,10 +255,10 @@ object DarwinCoreArchive {
         "CC0-1.0" -> "<para>To the extent possible under law, the publisher has waived all rights to these data and has dedicated them to the <ulink url=\"http://creativecommons.org/publicdomain/zero/1.0/legalcode\"><citetitle>Public Domain (CC0 1.0)</citetitle></ulink>. Users may copy, modify, distribute and use the work, including for commercial purposes, without restriction.</para>"
         "CC-BY-4.0" -> "<para>This work is licensed under a <ulink url=\"http://creativecommons.org/licenses/by/4.0/legalcode\"><citetitle>Creative Commons Attribution (CC-BY) 4.0 License</citetitle></ulink>.</para>"
         "CC-BY-NC-4.0" -> "<para>This work is licensed under a <ulink url=\"http://creativecommons.org/licenses/by-nc/4.0/legalcode\"><citetitle>Creative Commons Attribution Non Commercial (CC-BY-NC) 4.0 License</citetitle></ulink>.</para>"
-        else -> if (language == "eng") {
-            "<para>License not yet defined by the data holder. Set CC0, CC BY 4.0 or CC BY-NC 4.0 in the project before publishing.</para>"
-        } else {
-            "<para>Licença ainda não definida pelo detentor dos dados. Defina CC0, CC BY 4.0 ou CC BY-NC 4.0 no projeto antes de publicar.</para>"
+        else -> when (language) {
+            "eng" -> "<para>License not yet defined by the data holder. Set CC0, CC BY 4.0 or CC BY-NC 4.0 in the project before publishing.</para>"
+            "spa" -> "<para>Licencia aún no definida por el titular de los datos. Define CC0, CC BY 4.0 o CC BY-NC 4.0 en el proyecto antes de publicar.</para>"
+            else -> "<para>Licença ainda não definida pelo detentor dos dados. Defina CC0, CC BY 4.0 ou CC BY-NC 4.0 no projeto antes de publicar.</para>"
         }
     }
 

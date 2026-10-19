@@ -1,5 +1,6 @@
 package com.oikos.fieldbook.export
 
+import com.oikos.fieldbook.util.AppLanguage
 import java.time.LocalDate
 
 /**
@@ -60,8 +61,28 @@ object AppCitation {
     )
 
     /** Conteudo do COMO_CITAR.txt (ou HOW_TO_CITE.txt, projeto em ingles) das exportacoes. */
-    fun readme(version: String, english: Boolean = false, exportedOn: LocalDate = LocalDate.now()): String =
-        if (english) readmeEnglish(version, exportedOn) else readmePortuguese(version, exportedOn)
+    fun readme(version: String, language: AppLanguage = AppLanguage.PT, exportedOn: LocalDate = LocalDate.now()): String =
+        when (language) {
+            AppLanguage.PT -> readmePortuguese(version, exportedOn)
+            AppLanguage.EN -> readmeEnglish(version, exportedOn)
+            AppLanguage.ES -> readmeSpanish(version, exportedOn)
+        }
+
+    /** Em espanhol, como em ingles: APA e Vancouver. */
+    private fun readmeSpanish(version: String, exportedOn: LocalDate): String = buildString {
+        appendLine("Cómo citar Oikos FieldBook")
+        appendLine()
+        appendLine("Estos datos se registraron con Oikos FieldBook, versión $version (DOI $DOI).")
+        appendLine("Si los usas en un trabajo, informe o publicación, cita la app:")
+        listOf("APA" to apa(version), "Vancouver" to vancouver(version, exportedOn)).forEach { (style, text) ->
+            appendLine()
+            appendLine(style)
+            appendLine(text)
+        }
+        appendLine()
+        appendLine("Si los nombres científicos vinieron de una lista de especies instalada en la app,")
+        append("cita también la lista (aparece en la columna nameAccordingTo).")
+    }
 
     /** Em ingles, APA e Vancouver; a ABNT e norma brasileira e fica no arquivo em portugues. */
     private fun readmeEnglish(version: String, exportedOn: LocalDate): String = buildString {

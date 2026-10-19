@@ -45,8 +45,8 @@ class MunicipalityLocator(private val data: ByteArray) {
     init {
         val input = DataInputStream(ByteArrayInputStream(data))
         val magic = ByteArray(4).also { input.readFully(it) }
-        if (String(magic, Charsets.US_ASCII) != "OIKM") throw IOException(UiLanguage.t("malha municipal com formato desconhecido", "municipal map with an unknown format"))
-        if (input.readByte().toInt() != 1) throw IOException(UiLanguage.t("versão da malha municipal não suportada", "unsupported municipal map version"))
+        if (String(magic, Charsets.US_ASCII) != "OIKM") throw IOException(UiLanguage.t("malha municipal com formato desconhecido", "municipal map with an unknown format", "mapa de municipios con formato desconocido"))
+        if (input.readByte().toInt() != 1) throw IOException(UiLanguage.t("versão da malha municipal não suportada", "unsupported municipal map version", "versión del mapa de municipios no compatible"))
         scale = input.readInt()
         val count = input.readInt()
         entries = List(count) {

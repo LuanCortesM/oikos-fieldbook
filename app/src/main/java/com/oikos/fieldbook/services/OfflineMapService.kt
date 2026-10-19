@@ -53,11 +53,11 @@ class OfflineMapService(private val context: Context) {
         val total = runCatching { context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } }.getOrNull() ?: -1L
         val free = allocatableBytes(context, context.filesDir)
         if (total > 0 && total + 50L * 1024 * 1024 > free) {
-            throw IOException(UiLanguage.t("espaço insuficiente: o mapa tem ${total / (1024 * 1024)} MB e há ${free / (1024 * 1024)} MB livres", "not enough space: the map is ${total / (1024 * 1024)} MB and only ${free / (1024 * 1024)} MB are free"))
+            throw IOException(UiLanguage.t("espaço insuficiente: o mapa tem ${total / (1024 * 1024)} MB e há ${free / (1024 * 1024)} MB livres", "not enough space: the map is ${total / (1024 * 1024)} MB and only ${free / (1024 * 1024)} MB are free", "espacio insuficiente: el mapa ocupa ${total / (1024 * 1024)} MB y hay ${free / (1024 * 1024)} MB libres"))
         }
         val temporary = File(directory, "$baseName.importando")
         try {
-            val input = context.contentResolver.openInputStream(uri) ?: throw IOException(UiLanguage.t("não foi possível ler o arquivo escolhido", "could not read the chosen file"))
+            val input = context.contentResolver.openInputStream(uri) ?: throw IOException(UiLanguage.t("não foi possível ler o arquivo escolhido", "could not read the chosen file", "no se pudo leer el archivo elegido"))
             input.use { source ->
                 temporary.outputStream().use { target ->
                     val buffer = ByteArray(256 * 1024)
@@ -73,12 +73,12 @@ class OfflineMapService(private val context: Context) {
             }
             val map = read(temporary)
             if (map.format.equals("pbf", ignoreCase = true) || map.format.equals("mvt", ignoreCase = true)) {
-                throw IOException(UiLanguage.t("o arquivo tem tiles vetoriais (pbf); use um MBTiles raster (PNG ou JPG), como o que o QGIS gera", "the file has vector tiles (pbf); use a raster MBTiles (PNG or JPG), like the one QGIS generates"))
+                throw IOException(UiLanguage.t("o arquivo tem tiles vetoriais (pbf); use um MBTiles raster (PNG ou JPG), como o que o QGIS gera", "the file has vector tiles (pbf); use a raster MBTiles (PNG or JPG), like the one QGIS generates", "el archivo tiene teselas vectoriales (pbf); usa un MBTiles ráster (PNG o JPG), como el que genera QGIS"))
             }
             var target = File(directory, "$baseName.mbtiles")
             var suffix = 2
             while (target.exists()) target = File(directory, "$baseName-${suffix++}.mbtiles")
-            if (!temporary.renameTo(target)) throw IOException(UiLanguage.t("não foi possível guardar o mapa", "could not save the map"))
+            if (!temporary.renameTo(target)) throw IOException(UiLanguage.t("não foi possível guardar o mapa", "could not save the map", "no se pudo guardar el mapa"))
             return read(target)
         } finally {
             temporary.delete()
@@ -94,7 +94,7 @@ class OfflineMapService(private val context: Context) {
         val db = try {
             SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY or SQLiteDatabase.NO_LOCALIZED_COLLATORS)
         } catch (error: Exception) {
-            throw IOException(UiLanguage.t("o arquivo não é um MBTiles (banco SQLite)", "the file is not an MBTiles (SQLite database)"), error)
+            throw IOException(UiLanguage.t("o arquivo não é um MBTiles (banco SQLite)", "the file is not an MBTiles (SQLite database)", "el archivo no es un MBTiles (base de datos SQLite)"), error)
         }
         return db.use {
             val metadata = mutableMapOf<String, String>()
@@ -108,8 +108,8 @@ class OfflineMapService(private val context: Context) {
                     cursor.moveToFirst()
                     Triple(cursor.getInt(0), cursor.getInt(1), cursor.getLong(2))
                 }
-            }.getOrElse { throw IOException(UiLanguage.t("o arquivo não tem a tabela de tiles de um MBTiles", "the file does not have the tiles table of an MBTiles")) }
-            if (zooms.third == 0L) throw IOException(UiLanguage.t("o MBTiles não tem nenhum tile", "the MBTiles has no tiles"))
+            }.getOrElse { throw IOException(UiLanguage.t("o arquivo não tem a tabela de tiles de um MBTiles", "the file does not have the tiles table of an MBTiles", "el archivo no tiene la tabla de teselas de un MBTiles")) }
+            if (zooms.third == 0L) throw IOException(UiLanguage.t("o MBTiles não tem nenhum tile", "the MBTiles has no tiles", "el MBTiles no tiene ninguna tesela"))
             val bounds = metadata["bounds"]?.split(',')?.mapNotNull { value -> value.trim().toDoubleOrNull() }?.takeIf { b -> b.size == 4 }
             OfflineMap(
                 file = file,

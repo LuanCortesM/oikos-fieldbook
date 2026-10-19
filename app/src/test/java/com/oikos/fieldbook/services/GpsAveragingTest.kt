@@ -1,5 +1,6 @@
 package com.oikos.fieldbook.services
 
+import com.oikos.fieldbook.util.AppLanguage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -80,10 +81,19 @@ class GpsAveragingTest {
     @Test
     fun `observacao em ingles para projeto em ingles`() {
         val fix = GpsAveraging.average(listOf(reading(-22.0, -45.0, 4.0, 0), reading(-22.0, -45.0, 6.0, 5000)))!!
-        val text = fix.remarks(english = true)
+        val text = fix.remarks(AppLanguage.EN)
         assertTrue(text.startsWith("Mean of 2 phone GNSS readings (2 received in 5 s)"))
         assertTrue(text.contains("accuracy (median) 5.0 m"))
         assertTrue(text.endsWith("uncertainty = max(2 × accuracy, spread)."))
+    }
+
+    @Test
+    fun `observacao em espanhol para projeto em espanhol`() {
+        val fix = GpsAveraging.average(listOf(reading(-22.0, -45.0, 4.0, 0), reading(-22.0, -45.0, 6.0, 5000)))!!
+        val text = fix.remarks(AppLanguage.ES)
+        assertTrue(text.startsWith("Promedio de 2 lecturas GNSS del celular (de 2 recibidas en 5 s)"))
+        assertTrue(text.contains("(mediana) 5.0 m"))
+        assertTrue(text.endsWith("incertidumbre = máx(2 × precisión, dispersión)."))
     }
 
     @Test

@@ -94,10 +94,10 @@ object ChecklistParser {
         onProgress: (bytesRead: Long, totalBytes: Long) -> Unit = { _, _ -> },
         onDistribution: (taxonId: String, distribution: TaxonDistribution) -> Unit = { _, _ -> }
     ): ChecklistMetadata {
-        val meta = zip.getEntry("meta.xml") ?: throw IllegalArgumentException(UiLanguage.t("Arquivo sem meta.xml: não é um Darwin Core Archive.", "File without meta.xml: it is not a Darwin Core Archive."))
+        val meta = zip.getEntry("meta.xml") ?: throw IllegalArgumentException(UiLanguage.t("Arquivo sem meta.xml: não é um Darwin Core Archive.", "File without meta.xml: it is not a Darwin Core Archive.", "Archivo sin meta.xml: no es un Darwin Core Archive."))
         val specs = zip.getInputStream(meta).use { parseMeta(it) }
-        val core = specs[TAXON_ROW] ?: throw IllegalArgumentException(UiLanguage.t("O arquivo não é uma lista de espécies (core Taxon).", "The file is not a species list (Taxon core)."))
-        val coreEntry = zip.getEntry(core.location) ?: throw IllegalArgumentException(UiLanguage.t("Arquivo ${core.location} ausente.", "File ${core.location} is missing."))
+        val core = specs[TAXON_ROW] ?: throw IllegalArgumentException(UiLanguage.t("O arquivo não é uma lista de espécies (core Taxon).", "The file is not a species list (Taxon core).", "El archivo no es una lista de especies (núcleo Taxon)."))
+        val coreEntry = zip.getEntry(core.location) ?: throw IllegalArgumentException(UiLanguage.t("Arquivo ${core.location} ausente.", "File ${core.location} is missing.", "Falta el archivo ${core.location}."))
         val vernacularSpec = specs[VERNACULAR_ROW]
         val vernacularEntry = vernacularSpec?.let { zip.getEntry(it.location) }
         val distributionSpec = specs[DISTRIBUTION_ROW]

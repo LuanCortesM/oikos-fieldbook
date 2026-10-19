@@ -118,7 +118,7 @@ object BackupArchive {
                     entry.name.startsWith(MEDIA_PREFIX) -> {
                         val target = File(root, entry.name.removePrefix(MEDIA_PREFIX)).canonicalFile
                         if (!target.path.startsWith(root.path + File.separator)) {
-                            throw IOException(UiLanguage.t("Entrada inválida no backup: ${entry.name}", "Invalid entry in the backup: ${entry.name}"))
+                            throw IOException(UiLanguage.t("Entrada inválida no backup: ${entry.name}", "Invalid entry in the backup: ${entry.name}", "Entrada no válida en la copia de seguridad: ${entry.name}"))
                         }
                         target.parentFile?.mkdirs()
                         FileOutputStream(target).use { zip.copyTo(it) }
@@ -126,8 +126,8 @@ object BackupArchive {
                 }
             }
         }
-        if (!databaseFound) throw IOException(UiLanguage.t("O arquivo não contém o banco de dados do Oikos.", "The file does not contain the Oikos database."))
-        return manifest ?: throw IOException(UiLanguage.t("O arquivo não contém o manifesto do backup.", "The file does not contain the backup manifest."))
+        if (!databaseFound) throw IOException(UiLanguage.t("O arquivo não contém o banco de dados do Oikos.", "The file does not contain the Oikos database.", "El archivo no contiene la base de datos de Oikos."))
+        return manifest ?: throw IOException(UiLanguage.t("O arquivo não contém o manifesto do backup.", "The file does not contain the backup manifest.", "El archivo no contiene el manifiesto de la copia de seguridad."))
     }
 
     /**

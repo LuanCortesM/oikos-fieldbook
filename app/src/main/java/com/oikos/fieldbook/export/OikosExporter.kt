@@ -1,5 +1,6 @@
 ﻿package com.oikos.fieldbook.export
 
+import com.oikos.fieldbook.util.AppLanguage
 import com.oikos.fieldbook.util.UiLanguage
 import com.oikos.fieldbook.util.inProjectLanguage
 
@@ -10,6 +11,7 @@ import com.oikos.fieldbook.data.OccurrenceEntity
 import com.oikos.fieldbook.data.ProjectEntity
 import com.oikos.fieldbook.data.SessionEntity
 import com.oikos.fieldbook.dwc.DarwinCoreCatalog
+import com.oikos.fieldbook.dwc.spanishFieldLabels
 import com.oikos.fieldbook.services.MediaKind
 import com.oikos.fieldbook.util.CoordinateUtils
 import com.oikos.fieldbook.util.UtmHemisphere
@@ -120,8 +122,19 @@ internal class ExportPaths private constructor(
             "full_project.json", "occurrences_and_tracks.geojson", "expeditions.csv", "gps_track_points.csv",
             "measurement_or_fact.csv", "media.csv"
         )
+        // Sem acentos nos nomes de pasta e arquivo, como no portugues.
+        val ES = ExportPaths(
+            "Proyecto_", "COMO_CITAR.txt", "01_planilla_principal", "02_tablas_de_apoyo", "03_sig_qgis", "04_darwin_core_archive",
+            "05_multimedia", "fotos", "audios", "registros_darwin_core.csv", "oikos_fieldbook_exportacion_completa.xlsx",
+            "proyecto_completo.json", "registros_y_recorridos.geojson", "salidas_de_campo.csv", "recorrido_gps_puntos.csv",
+            "measurement_or_fact.csv", "multimedia.csv"
+        )
 
-        fun of(projectLanguage: String): ExportPaths = if (projectLanguage.startsWith("en", ignoreCase = true)) EN else PT
+        fun of(projectLanguage: String): ExportPaths = when (AppLanguage.ofProject(projectLanguage)) {
+            AppLanguage.PT -> PT
+            AppLanguage.EN -> EN
+            AppLanguage.ES -> ES
+        }
     }
 }
 
@@ -138,7 +151,12 @@ private class ExportPackage(
     private val sessionById = sessions.associateBy { it.id }
     private val occurrenceById = occurrences.associateBy { it.id }
     // Antes de mediaLinks: o caminho das midias depende do idioma.
-    private val english = project.language.startsWith("en", ignoreCase = true)
+    private val language = AppLanguage.ofProject(project.language)
+    private fun say(pt: String, en: String, es: String) = when (language) {
+        AppLanguage.PT -> pt
+        AppLanguage.EN -> en
+        AppLanguage.ES -> es
+    }
     private val paths = ExportPaths.of(project.language)
     // Ordem fixa (mais antiga primeiro): antes vinha da mais nova, e uma foto
     // nova mudava o numero -01/-02 das anteriores a cada exportacao.
@@ -319,34 +337,39 @@ private class ExportPackage(
         if (content == ExportContent.MediaOnly) {
             return XlsxWriter.write(
                 listOf(
-                    sheet("Mídias", "Media") to table(mediaLinks.map { it.csvMap() }),
-                    sheet("Resumo_Exportação", "Export_Summary") to listOf(
-                        listOf("item", if (english) "value" else "valor"),
+                    sheet("Mídias", "Media", "Multimedia") to table(mediaLinks.map { it.csvMap() }),
+                    sheet("Resumo_Exportação", "Export_Summary", "Resumen_Exportación") to listOf(
+                        listOf("item", say("valor", "value", "valor")),
                         listOf("projectName", project.name),
                         listOf("exportedAt", exportedAt()),
                         listOf("photos", mediaLinks.count { it.type == "photo" }.toString()),
                         listOf("audios", mediaLinks.count { it.type == "audio" }.toString()),
                         listOf("warnings", validationWarnings()),
-                        listOf(if (english) "howToCiteTheApp" else "comoCitarOApp", AppCitation.apa(appVersion))
+                        listOf(say("comoCitarOApp", "howToCiteTheApp", "comoCitarLaApp"), AppCitation.apa(appVersion))
                     )
                 )
             )
         }
         val occurrenceHeaders = occurrenceHeaders()
         val sheets = listOf(
-            sheet("Projeto", "Project") to listOf(projectMap().keys.toList(), projectMap().values.toList()),
-            sheet("Expedições", "Expeditions") to table(sessions.map { sessionMap(it) }),
-            sheet("Ocorrências_DarwinCore", "Occurrences_DarwinCore") to listOf(occurrenceHeaders) + occurrences.map {
+            sheet("Projeto", "Project", "Proyecto") to listOf(projectMap().keys.toList(), projectMap().values.toList()),
+            sheet("Expedições", "Expeditions", "Salidas_de_campo") to table(sessions.map { sessionMap(it) }),
+            sheet("Ocorrências_DarwinCore", "Occurrences_DarwinCore", "Registros_DarwinCore") to listOf(occurrenceHeaders) + occurrences.map {
                 val row = occurrenceMap(sessionById[it.sessionId], it, linksByOccurrence[it.id].orEmpty())
                 occurrenceHeaders.map { header -> row[header].orEmpty() }
             },
-            sheet("Mídias", "Media") to table(mediaLinks.map { it.csvMap() }),
-            sheet("Trilha_GPS", "GPS_Track") to table(trackPointRows()),
+            sheet("Mídias", "Media", "Multimedia") to table(mediaLinks.map { it.csvMap() }),
+            sheet("Trilha_GPS", "GPS_Track", "Recorrido_GPS") to table(trackPointRows()),
             "MeasurementOrFact" to table(measurementRows()),
-            sheet("Campos_Usados", "Fields_Used") to table(fields.map { fieldMap(it) }),
-            sheet("Legenda_PT_EN", "Legend_PT_EN") to listOf(listOf("dwcTerm", "Português", "English")) + fields.map { listOf(it.dwcTerm, it.labelPt, it.labelEn) },
-            sheet("Resumo_Exportação", "Export_Summary") to listOf(
-                listOf("item", if (english) "value" else "valor"),
+            sheet("Campos_Usados", "Fields_Used", "Campos_Usados") to table(fields.map { fieldMap(it) }),
+            if (language == AppLanguage.ES) {
+                "Leyenda_ES_EN" to listOf(listOf("dwcTerm", "Español", "English")) +
+                    fields.map { listOf(it.dwcTerm, spanishFieldLabels[it.dwcTerm] ?: it.labelPt, it.labelEn) }
+            } else {
+                sheet("Legenda_PT_EN", "Legend_PT_EN", "") to listOf(listOf("dwcTerm", "Português", "English")) + fields.map { listOf(it.dwcTerm, it.labelPt, it.labelEn) }
+            },
+            sheet("Resumo_Exportação", "Export_Summary", "Resumen_Exportación") to listOf(
+                listOf("item", say("valor", "value", "valor")),
                 listOf("projectName", project.name),
                 listOf("exportedAt", exportedAt()),
                 listOf("sessions", sessions.size.toString()),
@@ -356,31 +379,34 @@ private class ExportPackage(
                 listOf("tracks", tracks.size.toString()),
                 listOf("trackPoints", tracks.sumOf { it.points.size }.toString()),
                 listOf("coordinateFormat", project.coordinateFormat),
-                listOf("coordinateStorage", if (english) "Decimal degrees" else "Graus Decimais"),
+                listOf("coordinateStorage", say("Graus Decimais", "Decimal degrees", "Grados decimales")),
                 listOf(
                     "utmColumns",
                     when {
-                        project.coordinateFormat != "UTM" -> if (english) "Not applicable" else "Não aplicável"
-                        english -> "Included in the spreadsheets and GeoJSON properties"
-                        else -> "Incluídas nas planilhas e properties do GeoJSON"
+                        project.coordinateFormat != "UTM" -> say("Não aplicável", "Not applicable", "No aplica")
+                        else -> say(
+                            "Incluídas nas planilhas e properties do GeoJSON",
+                            "Included in the spreadsheets and GeoJSON properties",
+                            "Incluidas en las planillas y en las properties del GeoJSON"
+                        )
                     }
                 ),
                 listOf("geodeticDatum", project.defaultDatum),
                 listOf("warnings", validationWarnings()),
-                listOf(if (english) "howToCiteTheApp" else "comoCitarOApp", AppCitation.apa(appVersion))
+                listOf(say("comoCitarOApp", "howToCiteTheApp", "comoCitarLaApp"), AppCitation.apa(appVersion))
             )
         )
         return XlsxWriter.write(sheets)
     }
 
     /** Nome da aba no idioma do projeto. */
-    private fun sheet(pt: String, en: String) = if (english) en else pt
+    private fun sheet(pt: String, en: String, es: String) = say(pt, en, es)
 
     fun zipTo(output: OutputStream) {
         val root = "${paths.root}${OikosExporter.safeName(project.name)}"
         ZipOutputStream(output).use { zip ->
             zip.put("$root/README.txt", readme())
-            zip.put("$root/${paths.howToCite}", AppCitation.readme(appVersion, english))
+            zip.put("$root/${paths.howToCite}", AppCitation.readme(appVersion, language))
             zip.put("$root/manifest.json", manifestJson())
             if (content != ExportContent.MediaOnly) {
                 zip.put("$root/${paths.main}/${paths.occurrencesCsv}", occurrencesCsv())
@@ -480,7 +506,7 @@ private class ExportPackage(
                     "measurementType" to type,
                     "measurementValue" to value,
                     "measurementUnit" to unit,
-                    "measurementRemarks" to inProjectLanguage(project.language, "Oikos FieldBook: gravação ${link.fileName}", "Oikos FieldBook: recording ${link.fileName}")
+                    "measurementRemarks" to inProjectLanguage(project.language, "Oikos FieldBook: gravação ${link.fileName}", "Oikos FieldBook: recording ${link.fileName}", "Oikos FieldBook: grabación ${link.fileName}")
                 )
             }
         }
@@ -516,21 +542,26 @@ private class ExportPackage(
             creatorName = project.principalInvestigator.trim(),
             organization = project.institution.trim(),
             abstractText = project.description.ifBlank {
-                inProjectLanguage(project.language, "Conjunto de dados de ocorrência coletado com o Oikos FieldBook.", "Occurrence dataset collected with Oikos FieldBook.")
+                inProjectLanguage(project.language, "Conjunto de dados de ocorrência coletado com o Oikos FieldBook.", "Occurrence dataset collected with Oikos FieldBook.", "Conjunto de datos de registros biológicos colectado con Oikos FieldBook.")
             },
             licenseCode = project.license,
             methods = sessions.mapNotNull { it.samplingProtocol.ifBlank { null } }
                 .distinct()
                 .joinToString("; ")
-                .ifBlank { inProjectLanguage(project.language, "Protocolo de amostragem não informado.", "Sampling protocol not reported.") },
+                .ifBlank { inProjectLanguage(project.language, "Protocolo de amostragem não informado.", "Sampling protocol not reported.", "Protocolo de muestreo no informado.") },
             packageId = "oikos-fieldbook/PROJ-${project.id.toString().padStart(3, '0')}",
             pubDate = LocalDate.now().toString(),
             geographicDescription = sessions.mapNotNull { it.locality.ifBlank { null } }
                 .distinct()
                 .take(10)
                 .joinToString("; ")
-                .ifBlank { inProjectLanguage(project.language, "Localidade não informada.", "Locality not reported.") },
-            language = if (project.language.startsWith("en")) "eng" else "por",
+                .ifBlank { inProjectLanguage(project.language, "Localidade não informada.", "Locality not reported.", "Localidad no informada.") },
+            // ISO 639-2, como o GBIF le no eml.xml.
+            language = when (language) {
+                AppLanguage.PT -> "por"
+                AppLanguage.EN -> "eng"
+                AppLanguage.ES -> "spa"
+            },
             westBound = pontos.minOfOrNull { it.longitude ?: 0.0 },
             eastBound = pontos.maxOfOrNull { it.longitude ?: 0.0 },
             southBound = pontos.minOfOrNull { it.latitude ?: 0.0 },
@@ -538,7 +569,7 @@ private class ExportPackage(
             beginDate = datas.firstOrNull().orEmpty(),
             endDate = datas.lastOrNull().orEmpty(),
             taxa = occurrences.mapNotNull { it.scientificName.ifBlank { null } }.distinct().sorted(),
-            softwareCitation = inProjectLanguage(project.language, "Dados registrados com o aplicativo Oikos FieldBook, versão $appVersion. ", "Data recorded with the Oikos FieldBook app, version $appVersion. ") + AppCitation.apa(appVersion)
+            softwareCitation = inProjectLanguage(project.language, "Dados registrados com o aplicativo Oikos FieldBook, versão $appVersion. ", "Data recorded with the Oikos FieldBook app, version $appVersion. ", "Datos registrados con la app Oikos FieldBook, versión $appVersion. ") + AppCitation.apa(appVersion)
         )
 
         return DarwinCoreArchive.build(
@@ -556,21 +587,22 @@ private class ExportPackage(
         val warnings = mutableListOf<String>()
         if (format == ExportFormat.DwcArchive || format == ExportFormat.Zip) {
             if (project.license.isBlank()) {
-                warnings += UiLanguage.t("Licença do conjunto não definida: o GBIF exige CC0, CC BY ou CC BY-NC (defina em Editar projeto).", "Dataset license not set: GBIF requires CC0, CC BY or CC BY-NC (set it in Edit project).")
+                warnings += UiLanguage.t("Licença do conjunto não definida: o GBIF exige CC0, CC BY ou CC BY-NC (defina em Editar projeto).", "Dataset license not set: GBIF requires CC0, CC BY or CC BY-NC (set it in Edit project).", "Licencia del conjunto no definida: GBIF exige CC0, CC BY o CC BY-NC (defínela en Editar proyecto).")
             }
             if (project.mediaBaseUrl.isBlank() && mediaLinks.any { it.occurrenceID.isNotBlank() }) {
-                warnings += UiLanguage.t("Mídias fora do Darwin Core Archive: o padrão exige URL pública. Informe a URL das mídias em Editar projeto.", "Media left out of the Darwin Core Archive: the standard requires a public URL. Enter the media URL in Edit project.")
+                warnings += UiLanguage.t("Mídias fora do Darwin Core Archive: o padrão exige URL pública. Informe a URL das mídias em Editar projeto.", "Media left out of the Darwin Core Archive: the standard requires a public URL. Enter the media URL in Edit project.", "Archivos multimedia fuera del Darwin Core Archive: el estándar exige una URL pública. Indica la URL de los archivos multimedia en Editar proyecto.")
             }
         }
         // Aviso aparece na tela depois de exportar: segue o idioma do app.
-        fun plural(n: Int, ptOne: String, ptMany: String, enOne: String, enMany: String) =
-            UiLanguage.t(if (n == 1) ptOne else ptMany, if (n == 1) enOne else enMany)
-        if (occurrences.isEmpty()) warnings += UiLanguage.t("Nenhuma ocorrência encontrada para exportar.", "No occurrences found to export.")
+        fun plural(n: Int, ptOne: String, ptMany: String, enOne: String, enMany: String, esOne: String, esMany: String) =
+            UiLanguage.t(if (n == 1) ptOne else ptMany, if (n == 1) enOne else enMany, if (n == 1) esOne else esMany)
+        if (occurrences.isEmpty()) warnings += UiLanguage.t("Nenhuma ocorrência encontrada para exportar.", "No occurrences found to export.", "No se encontraron registros para exportar.")
         val withoutId = occurrences.count { it.occurrenceId.isBlank() }
         if (withoutId > 0) warnings += plural(
             withoutId,
             "1 ocorrência sem occurrenceID.", "$withoutId ocorrências sem occurrenceID.",
-            "1 occurrence without occurrenceID.", "$withoutId occurrences without occurrenceID."
+            "1 occurrence without occurrenceID.", "$withoutId occurrences without occurrenceID.",
+            "1 registro sin occurrenceID.", "$withoutId registros sin occurrenceID."
         )
         val withoutCoordinates = occurrences.count { placeOf(it, sessionById[it.sessionId]).latitude == null }
         if (withoutCoordinates > 0) warnings += plural(
@@ -578,7 +610,9 @@ private class ExportPackage(
             "1 ocorrência sem coordenadas (nem própria, nem da expedição); ela não aparece no GeoJSON.",
             "$withoutCoordinates ocorrências sem coordenadas (nem própria, nem da expedição); elas não aparecem no GeoJSON.",
             "1 occurrence without coordinates (neither its own nor the expedition's); it is not in the GeoJSON.",
-            "$withoutCoordinates occurrences without coordinates (neither their own nor the expedition's); they are not in the GeoJSON."
+            "$withoutCoordinates occurrences without coordinates (neither their own nor the expedition's); they are not in the GeoJSON.",
+            "1 registro sin coordenadas (ni propias ni de la salida de campo); no aparece en el GeoJSON.",
+            "$withoutCoordinates registros sin coordenadas (ni propias ni de la salida de campo); no aparecen en el GeoJSON."
         )
         val inherited = occurrences.count { (it.latitude == null || it.longitude == null) && placeOf(it, sessionById[it.sessionId]).latitude != null }
         if (inherited > 0) warnings += plural(
@@ -586,7 +620,9 @@ private class ExportPackage(
             "1 ocorrência sem coordenada própria sai com o ponto da expedição.",
             "$inherited ocorrências sem coordenada própria saem com o ponto da expedição.",
             "1 occurrence without its own coordinate uses the expedition point.",
-            "$inherited occurrences without their own coordinate use the expedition point."
+            "$inherited occurrences without their own coordinate use the expedition point.",
+            "1 registro sin coordenada propia sale con el punto de la salida de campo.",
+            "$inherited registros sin coordenada propia salen con el punto de la salida de campo."
         )
         val emptyTracks = tracks.count { it.points.size < 2 }
         if (emptyTracks > 0) warnings += plural(
@@ -594,7 +630,9 @@ private class ExportPackage(
             "1 trilha com menos de 2 pontos; ela aparece no CSV, mas não forma LineString no GeoJSON.",
             "$emptyTracks trilhas com menos de 2 pontos; elas aparecem no CSV, mas não formam LineString no GeoJSON.",
             "1 track with fewer than 2 points; it is in the CSV but does not form a LineString in the GeoJSON.",
-            "$emptyTracks tracks with fewer than 2 points; they are in the CSV but do not form a LineString in the GeoJSON."
+            "$emptyTracks tracks with fewer than 2 points; they are in the CSV but do not form a LineString in the GeoJSON.",
+            "1 recorrido con menos de 2 puntos; aparece en el CSV, pero no forma un LineString en el GeoJSON.",
+            "$emptyTracks recorridos con menos de 2 puntos; aparecen en el CSV, pero no forman un LineString en el GeoJSON."
         )
         val missingMedia = mediaLinks.count { !File(it.sourcePath).exists() }
         if (missingMedia > 0) warnings += plural(
@@ -602,25 +640,30 @@ private class ExportPackage(
             "1 arquivo de mídia não foi encontrado no armazenamento local.",
             "$missingMedia arquivos de mídia não foram encontrados no armazenamento local.",
             "1 media file was not found in local storage.",
-            "$missingMedia media files were not found in local storage."
+            "$missingMedia media files were not found in local storage.",
+            "1 archivo multimedia no se encontró en el almacenamiento local.",
+            "$missingMedia archivos multimedia no se encontraron en el almacenamiento local."
         )
         val mediaWithoutEvent = mediaLinks.count { it.eventID.isBlank() }
         if (mediaWithoutEvent > 0) warnings += plural(
             mediaWithoutEvent,
             "1 mídia sem eventID de expedição.", "$mediaWithoutEvent mídias sem eventID de expedição.",
-            "1 media file without an expedition eventID.", "$mediaWithoutEvent media files without an expedition eventID."
+            "1 media file without an expedition eventID.", "$mediaWithoutEvent media files without an expedition eventID.",
+            "1 archivo multimedia sin el eventID de la salida de campo.", "$mediaWithoutEvent archivos multimedia sin el eventID de la salida de campo."
         )
         val mediaWithoutOccurrence = mediaLinks.count { it.occurrenceID.isBlank() }
         if (mediaWithoutOccurrence > 0) warnings += plural(
             mediaWithoutOccurrence,
             "1 mídia ligada apenas à expedição, sem occurrenceID.", "$mediaWithoutOccurrence mídias ligadas apenas à expedição, sem occurrenceID.",
-            "1 media file linked only to the expedition, without occurrenceID.", "$mediaWithoutOccurrence media files linked only to the expedition, without occurrenceID."
+            "1 media file linked only to the expedition, without occurrenceID.", "$mediaWithoutOccurrence media files linked only to the expedition, without occurrenceID.",
+            "1 archivo multimedia vinculado solo a la salida de campo, sin occurrenceID.", "$mediaWithoutOccurrence archivos multimedia vinculados solo a la salida de campo, sin occurrenceID."
         )
         val duplicatedNames = mediaLinks.groupBy { it.relativePath }.count { it.value.size > 1 }
         if (duplicatedNames > 0) warnings += plural(
             duplicatedNames,
             "1 nome de mídia duplicado na exportação.", "$duplicatedNames nomes de mídia duplicados na exportação.",
-            "1 duplicated media name in the export.", "$duplicatedNames duplicated media names in the export."
+            "1 duplicated media name in the export.", "$duplicatedNames duplicated media names in the export.",
+            "1 nombre de archivo multimedia duplicado en la exportación.", "$duplicatedNames nombres de archivos multimedia duplicados en la exportación."
         )
         return warnings.joinToString("\n")
     }
@@ -666,7 +709,39 @@ private class ExportPackage(
             .toString(2)
     }
 
-    private fun readme(): String = if (english) readmeEnglish() else readmePortuguese()
+    private fun readme(): String = say(readmePortuguese(), readmeEnglish(), readmeSpanish())
+
+    private fun readmeSpanish(): String = """
+        Oikos FieldBook - Exportación completa
+
+        Proyecto: ${project.name}
+        Exportado el: ${exportedAt()}
+        Datum: ${project.defaultDatum}
+        Coordenadas internas/Darwin Core: grados decimales (decimalLatitude, decimalLongitude)
+        Altitud: metros sobre el nivel del mar. El GPS mide la altura sobre el elipsoide WGS84; la app la convierte con el geoide EGM2008, y esos registros llevan verticalDatum = EGM2008.
+        Formato de coordenadas configurado en el proyecto: ${project.coordinateFormat}
+        ${if (project.coordinateFormat == "UTM") "Las coordenadas UTM también aparecen en verbatimCoordinates, verbatimCoordinateSystem, verbatimSRS, utmZone, utmHemisphere, utmEasting y utmNorthing." else ""}
+
+        Estructura:
+        - ${paths.main}/: archivos principales para el análisis. El CSV Darwin Core es la tabla principal de registros; el XLSX reúne proyecto, salidas de campo, registros, archivos multimedia, recorridos y campos usados en hojas separadas.
+        - ${paths.support}/: tablas de apoyo, como salidas de campo, archivos multimedia, puntos del recorrido GPS y MeasurementOrFact.
+        - ${paths.gis}/: GeoJSON para abrir en QGIS, con los registros como Point y los recorridos como LineString.
+        - ${paths.dwca}/dwca.zip: paquete Darwin Core Archive (meta.xml, eml.xml, occurrence.txt y extensiones) para IPT, GBIF y SiBBr.
+        - ${paths.media}/${paths.photos}/: fotos exportadas con nombres rastreables.
+        - ${paths.media}/${paths.audios}/: audios exportados con nombres rastreables.
+        - manifest.json: resumen de la exportación y relación completa entre archivos multimedia y registros.
+
+        Cada foto o audio está vinculado a un registro por occurrenceID, o a una salida de campo por eventID.
+        Consulta la columna associatedMedia en ${paths.main}/${paths.occurrencesCsv} o la tabla ${paths.support}/${paths.mediaCsv}.
+        Cómo citar la app: consulta ${paths.howToCite}.
+        Cuando hay más de un archivo multimedia, associatedMedia usa rutas relativas separadas por punto y coma.
+        En el Darwin Core Archive, associatedMedia y la extensión multimedia usan la URL pública del proyecto seguida del nombre del archivo: publica juntas las fotos y los audios de ${paths.media}/${paths.photos} y ${paths.media}/${paths.audios}, sin subcarpetas, en esa dirección (como en un registro de Zenodo).
+
+        Para QGIS:
+        Abre ${paths.gis}/${paths.geojson}. La geometría usa Point en el orden longitud, latitud.
+        Si el proyecto está en UTM, los valores UTM quedan en las propiedades de la capa; la geometría del GeoJSON sigue en longitud/latitud, como exige el formato.
+        Los registros sin coordenadas quedan en las planillas, pero no aparecen en el GeoJSON.
+    """.trimIndent()
 
     private fun readmeEnglish(): String = """
         Oikos FieldBook - Full export

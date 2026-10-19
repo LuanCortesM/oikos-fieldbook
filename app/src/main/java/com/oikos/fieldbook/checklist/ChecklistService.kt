@@ -156,14 +156,14 @@ class ChecklistService(private val context: Context, private val database: Check
             val neededMb = source.approxDownloadMb + source.approxInstalledMb + 50
             val freeMb = allocatableBytes(context, context.filesDir) / (1024 * 1024)
             if (freeMb < neededMb) {
-                throw IOException(UiLanguage.t("espaço insuficiente: são necessários cerca de $neededMb MB livres e há $freeMb MB", "not enough space: about $neededMb MB free are needed and there are $freeMb MB"))
+                throw IOException(UiLanguage.t("espaço insuficiente: são necessários cerca de $neededMb MB livres e há $freeMb MB", "not enough space: about $neededMb MB free are needed and there are $freeMb MB", "espacio insuficiente: se necesitan unos $neededMb MB libres y hay $freeMb MB"))
             }
             val zip = File(context.cacheDir, "checklist-${source.key}.zip")
             val failures = mutableListOf<String>()
             try {
                 for (url in source.candidateUrls) {
                     try {
-                        onProgress(UiLanguage.t("Conectando...", "Connecting..."), null)
+                        onProgress(UiLanguage.t("Conectando...", "Connecting...", "Conectando..."), null)
                         fetch(url, zip, onProgress)
                         return@withContext importZip(source.key, url, zip, onProgress)
                     } catch (error: IOException) {
@@ -190,14 +190,14 @@ class ChecklistService(private val context: Context, private val database: Check
                         if (read < 0) break
                         output.write(buffer, 0, read)
                         done += read
-                        onProgress(UiLanguage.t("Baixando ${done / (1024 * 1024)} MB", "Downloading ${done / (1024 * 1024)} MB"), if (total > 0) done.toFloat() / total else null)
+                        onProgress(UiLanguage.t("Baixando ${done / (1024 * 1024)} MB", "Downloading ${done / (1024 * 1024)} MB", "Descargando ${done / (1024 * 1024)} MB"), if (total > 0) done.toFloat() / total else null)
                     }
                 }
             }
         }
         // Um firewall pode responder 200 com uma pagina HTML no lugar do arquivo.
         val magic = target.inputStream().use { input -> ByteArray(4).also { input.read(it) } }
-        if (!(magic[0] == 'P'.code.toByte() && magic[1] == 'K'.code.toByte())) throw IOException(UiLanguage.t("a resposta não é um arquivo .zip", "the response is not a .zip file"))
+        if (!(magic[0] == 'P'.code.toByte() && magic[1] == 'K'.code.toByte())) throw IOException(UiLanguage.t("a resposta não é um arquivo .zip", "the response is not a .zip file", "la respuesta no es un archivo .zip"))
     }
 
     /**
@@ -213,15 +213,15 @@ class ChecklistService(private val context: Context, private val database: Check
     /** Instala a copia da lista que vem dentro do app, sem internet. */
     suspend fun installEmbedded(source: ChecklistSource, onProgress: (stage: String, fraction: Float?) -> Unit): ChecklistEntity =
         withContext(Dispatchers.IO) {
-            val asset = source.embeddedAsset ?: throw IOException(UiLanguage.t("Esta lista não vem no app.", "This list does not come with the app."))
+            val asset = source.embeddedAsset ?: throw IOException(UiLanguage.t("Esta lista não vem no app.", "This list does not come with the app.", "Esta lista no viene con la app."))
             val neededMb = source.approxInstalledMb + 30
             val freeMb = allocatableBytes(context, context.filesDir) / (1024 * 1024)
             if (freeMb < neededMb) {
-                throw IOException(UiLanguage.t("espaço insuficiente: são necessários cerca de $neededMb MB livres e há $freeMb MB", "not enough space: about $neededMb MB free are needed and there are $freeMb MB"))
+                throw IOException(UiLanguage.t("espaço insuficiente: são necessários cerca de $neededMb MB livres e há $freeMb MB", "not enough space: about $neededMb MB free are needed and there are $freeMb MB", "espacio insuficiente: se necesitan unos $neededMb MB libres y hay $freeMb MB"))
             }
             val zip = File(context.cacheDir, "checklist-${source.key}-app.zip")
             try {
-                onProgress(UiLanguage.t("Preparando a lista...", "Preparing the list..."), null)
+                onProgress(UiLanguage.t("Preparando a lista...", "Preparing the list...", "Preparando la lista..."), null)
                 context.assets.open(asset).use { input -> zip.outputStream().use { input.copyTo(it) } }
                 importZip(source.key, EMBEDDED_URL, zip, onProgress)
             } finally {
@@ -236,7 +236,7 @@ class ChecklistService(private val context: Context, private val database: Check
             val zip = File(context.cacheDir, "checklist-arquivo.zip")
             try {
                 context.contentResolver.openInputStream(uri)?.use { input -> zip.outputStream().use { input.copyTo(it) } }
-                    ?: throw IOException(UiLanguage.t("Não foi possível ler o arquivo escolhido.", "Could not read the chosen file."))
+                    ?: throw IOException(UiLanguage.t("Não foi possível ler o arquivo escolhido.", "Could not read the chosen file.", "No se pudo leer el archivo elegido."))
                 importZip("arquivo:$name", "", zip, onProgress)
             } finally {
                 zip.delete()
@@ -312,7 +312,7 @@ class ChecklistService(private val context: Context, private val database: Check
                         )
                         if (vernaculars.size >= BATCH) flushVernaculars()
                     },
-                    onProgress = { done, total -> onProgress(UiLanguage.t("Importando nomes", "Importing names"), if (total > 0) done.toFloat() / total else null) },
+                    onProgress = { done, total -> onProgress(UiLanguage.t("Importando nomes", "Importing names", "Importando nombres"), if (total > 0) done.toFloat() / total else null) },
                     onDistribution = { taxonId, distribution ->
                         distributions += DistributionEntity.of(id, taxonId, distribution)
                         if (distributions.size >= BATCH) flushDistributions()
@@ -322,7 +322,7 @@ class ChecklistService(private val context: Context, private val database: Check
             flushNames()
             flushVernaculars()
             flushDistributions()
-            if (count == 0) throw IOException(UiLanguage.t("O arquivo não contém nomes de táxons.", "The file does not contain taxon names."))
+            if (count == 0) throw IOException(UiLanguage.t("O arquivo não contém nomes de táxons.", "The file does not contain taxon names.", "El archivo no contiene nombres de taxones."))
             val title = metadata.title.ifBlank { ChecklistSources.byKey(sourceKey)?.title ?: sourceKey.removePrefix("arquivo:") }
             dao.finishChecklist(id, count, metadata.version, metadata.pubDate, metadata.license, metadata.citation, title)
             dao.getBySource(sourceKey)?.let { old -> dao.deleteChecklist(old.id) }
@@ -480,7 +480,7 @@ class ChecklistService(private val context: Context, private val database: Check
         val code = connection.responseCode
         if (code !in 200..299) {
             connection.disconnect()
-            throw IOException(UiLanguage.t("erro HTTP $code", "HTTP error $code"))
+            throw IOException(UiLanguage.t("erro HTTP $code", "HTTP error $code", "error HTTP $code"))
         }
         return connection
     }
@@ -495,7 +495,7 @@ class ChecklistService(private val context: Context, private val database: Check
 
     private fun describe(error: IOException): String = when (error) {
         is java.net.UnknownHostException, is java.net.ConnectException -> NO_CONNECTION
-        is java.net.SocketTimeoutException -> UiLanguage.t("a conexão ficou lenta demais e foi interrompida", "the connection got too slow and was interrupted")
+        is java.net.SocketTimeoutException -> UiLanguage.t("a conexão ficou lenta demais e foi interrompida", "the connection got too slow and was interrupted", "la conexión se volvió demasiado lenta y se interrumpió")
         else -> error.message ?: error.javaClass.simpleName
     }
 
@@ -503,6 +503,6 @@ class ChecklistService(private val context: Context, private val database: Check
         private const val BATCH = 2_000
         /** sourceUrl de uma lista instalada da copia que vem no app. */
         const val EMBEDDED_URL = "app"
-        private val NO_CONNECTION: String get() = UiLanguage.t("sem conexão com a internet", "no internet connection")
+        private val NO_CONNECTION: String get() = UiLanguage.t("sem conexão com a internet", "no internet connection", "sin conexión a internet")
     }
 }

@@ -248,6 +248,11 @@ import com.oikos.fieldbook.services.TrashItem
 import com.oikos.fieldbook.services.TrashService
 import com.oikos.fieldbook.services.TrackProfile
 import com.oikos.fieldbook.services.TransferManifest
+import com.oikos.fieldbook.ui.englishText
+import com.oikos.fieldbook.ui.spanishText
+import com.oikos.fieldbook.dwc.spanishFieldLabels
+import com.oikos.fieldbook.util.AppLanguage
+import com.oikos.fieldbook.util.inProjectLanguage
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.key
 import org.osmdroid.util.GeoPoint
@@ -285,11 +290,7 @@ class MainActivity : ComponentActivity() {
             var simpleMode by remember { mutableStateOf(languagePrefs.getBoolean("simple_mode", true)) }
             var languageMode by remember { mutableStateOf(languagePrefs.getString("app_language", "auto") ?: "auto") }
             var showLaunch by rememberSaveable { mutableStateOf(true) }
-            val uiLanguage = when (languageMode) {
-                "pt" -> OikosLanguage.Portuguese
-                "en" -> OikosLanguage.English
-                else -> deviceLanguage
-            }
+            val uiLanguage = AppLanguage.resolve(languageMode, deviceLanguage)
             var launchBarRunning by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) {
                 // Sem o aviso de saida (abertura sem a tela do sistema), segue em 400 ms.
@@ -347,10 +348,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun currentDeviceUiLanguage(): OikosLanguage {
-        val locale = resources.configuration.locales[0]
-        return if (locale.language.equals("pt", ignoreCase = true)) OikosLanguage.Portuguese else OikosLanguage.English
-    }
+    /** Codigo do idioma do celular ("pt", "es", "en"...), para o modo automatico. */
+    private fun currentDeviceUiLanguage(): String = resources.configuration.locales[0].language
 
     private fun applySystemBars(darkTheme: Boolean) {
         val transparent = android.graphics.Color.TRANSPARENT
@@ -374,9 +373,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class OikosLanguage { Portuguese, English }
-
-private val LocalOikosLanguage = staticCompositionLocalOf { OikosLanguage.Portuguese }
+private val LocalOikosLanguage = staticCompositionLocalOf { AppLanguage.PT }
 
 /** Mapa offline escolhido em Configuracoes; nulo = OpenStreetMap pela internet. */
 private val LocalOfflineMap = compositionLocalOf<OfflineMap?> { null }
@@ -550,8 +547,8 @@ private fun OikosApp(
     }
 
     // As mensagens nascem em portugues no ViewModel; as fixas sao traduzidas aqui.
-    val portugueseUi = LocalOikosLanguage.current == OikosLanguage.Portuguese
-    fun inUiLanguage(text: String) = if (portugueseUi) text else englishUiText(text)
+    val messageLanguage = LocalOikosLanguage.current
+    fun inUiLanguage(text: String) = uiText(text, messageLanguage)
     LaunchedEffect(message) {
         message?.let {
             snackbarHostState.showSnackbar(inUiLanguage(it))
@@ -824,7 +821,7 @@ private fun ProjectListScreen(
 
 @Composable
 private fun ProjectEditScreen(viewModel: AppViewModel, projectId: Long?, modifier: Modifier, onBack: () -> Unit, onSaved: (Long) -> Unit) {
-    val defaultProjectLanguage = if (LocalOikosLanguage.current == OikosLanguage.Portuguese) "pt" else "en"
+    val defaultProjectLanguage = LocalOikosLanguage.current.code
     val existing by remember(viewModel, projectId) { projectId?.let { viewModel.observeProject(it) } ?: kotlinx.coroutines.flow.flowOf(null) }.collectAsState(initial = null)
     val savedFields by remember(viewModel, projectId) { projectId?.let { viewModel.observeFields(it) } ?: kotlinx.coroutines.flow.flowOf(emptyList()) }.collectAsState(initial = emptyList())
     // Todo o formulario, inclusive a escolha de campos de um projeto novo,
@@ -952,7 +949,7 @@ private fun ProjectEditScreen(viewModel: AppViewModel, projectId: Long?, modifie
             ChipRow("Datum padrão", listOf("SIRGAS 2000" to "SIRGAS 2000", "WGS84" to "WGS84"), form["datum"]) { form["datum"] = it }
             ChipRow("Formato de coordenadas", listOf("DD" to "Graus Decimais", "UTM" to "UTM", "DMS" to "DMS", "DMM" to "DMM"), form["coordFormat"]) { form["coordFormat"] = it }
             // "Média" ja e chave de outra traducao ("Average", da media de GPS).
-            val mediumQuality = if (LocalOikosLanguage.current == OikosLanguage.Portuguese) "Média" else "Medium"
+            val mediumQuality = tr("Média", "Medium", "Media")
             ChipRow("Qualidade da foto", listOf("low" to "Baixa", "medium" to mediumQuality, "high" to "Alta"), form["photoQuality"]) { form["photoQuality"] = it }
             Text(ui("Publicação dos dados"), style = MaterialTheme.typography.titleMedium)
             ChipRow(
@@ -995,7 +992,7 @@ private fun ProjectEditScreen(viewModel: AppViewModel, projectId: Long?, modifie
 @Composable
 private fun NameGroupSelector(selection: String, onChange: (String) -> Unit) {
     val chosen = com.oikos.fieldbook.checklist.NameGroup.parseSelection(selection)
-    val portuguese = LocalOikosLanguage.current == OikosLanguage.Portuguese
+    val language = LocalOikosLanguage.current
     fun toggle(group: com.oikos.fieldbook.checklist.NameGroup) {
         val next = if (group.code in chosen) chosen - group.code else chosen + group.code
         // Ordem fixa (a do enum) para o valor salvo nao mudar a toa.
@@ -1014,7 +1011,7 @@ private fun NameGroupSelector(selection: String, onChange: (String) -> Unit) {
                 FilterChip(
                     selected = group.code in chosen,
                     onClick = { toggle(group) },
-                    label = { Text(if (portuguese) group.pt else group.en) }
+                    label = { Text(when (language) { AppLanguage.PT -> group.pt; AppLanguage.EN -> group.en; AppLanguage.ES -> group.es }) }
                 )
             }
         }
@@ -1334,7 +1331,7 @@ private fun SessionEditScreen(
                 val base = existing ?: SessionEntity(projectId = projectId, eventId = eventId, name = "")
                 val session = base.copy(
                     eventId = eventId.trim(),
-                    name = name.trim().ifBlank { if (project.isEnglishData()) "Expedition $date" else "Expedição $date" },
+                    name = name.trim().ifBlank { inProjectLanguage(project?.language ?: "pt", "Expedição $date", "Expedition $date", "Salida de campo $date") },
                     eventDate = date,
                     startTime = startTime,
                     endTime = endTime,
@@ -1389,10 +1386,17 @@ private fun SessionEditScreen(
             TextInput("Tipo de ambiente", environmentType) { environmentType = it }
             // Modelos: o nome padronizado do protocolo e a unidade amostral; o
             // esforco continua digitado, com um exemplo do proprio protocolo.
-            val preset = SAMPLING_PRESETS.firstOrNull { it.protocol == protocol }
-            ChipRow("Protocolo (modelos)", SAMPLING_PRESETS.map { it.protocol to it.label }, protocol) { chosen ->
-                SAMPLING_PRESETS.firstOrNull { it.protocol == chosen }?.let { picked ->
-                    protocol = picked.protocol
+            // O protocolo vai para o dado (dwc:samplingProtocol): no idioma do
+            // projeto. Antes saia em portugues tambem nos projetos em ingles.
+            val dataLanguage = project.dataLanguage()
+            val preset = SAMPLING_PRESETS.firstOrNull { it.protocol.matches(protocol) }
+            ChipRow(
+                "Protocolo (modelos)",
+                SAMPLING_PRESETS.map { it.protocol.of(dataLanguage) to it.label },
+                preset?.protocol?.of(dataLanguage) ?: protocol
+            ) { chosen ->
+                SAMPLING_PRESETS.firstOrNull { it.protocol.of(dataLanguage) == chosen }?.let { picked ->
+                    protocol = picked.protocol.of(dataLanguage)
                     if (sampleSizeUnit.isBlank() && picked.unit.isNotBlank()) sampleSizeUnit = picked.unit
                 }
             }
@@ -1400,7 +1404,9 @@ private fun SessionEditScreen(
             TextInput(
                 "Esforço amostral",
                 effort,
-                help = preset?.effortExample?.let { "${ui("Exemplo para este protocolo")}: $it" }
+                help = preset?.effortExample?.let { example ->
+                    "${ui("Exemplo para este protocolo")}: ${example.of(LocalOikosLanguage.current)}"
+                }
                     ?: "Tempo, distância ou método usado na coleta. Exemplo: 2 horas de busca ativa."
             ) { effort = it }
             TextInput("Equipe de campo", fieldTeam) { fieldTeam = it }
@@ -1465,8 +1471,23 @@ private fun SessionEditScreen(
     }
 }
 
-/** Protocolo de amostragem comum, com a unidade amostral do Darwin Core. */
-private data class SamplingPreset(val label: String, val protocol: String, val unit: String, val effortExample: String?)
+/**
+ * Protocolo de amostragem comum, com a unidade amostral do Darwin Core. O
+ * protocolo vai para o dado, no idioma do projeto; o exemplo de esforco so
+ * aparece na tela, no idioma da tela.
+ */
+private data class SamplingPreset(val label: String, val protocol: Trilingual, val unit: String, val effortExample: Trilingual?)
+
+/** O mesmo texto em portugues, ingles e espanhol. */
+private data class Trilingual(val pt: String, val en: String, val es: String) {
+    fun of(language: AppLanguage): String = when (language) {
+        AppLanguage.PT -> pt
+        AppLanguage.EN -> en
+        AppLanguage.ES -> es
+    }
+
+    fun matches(text: String): Boolean = text == pt || text == en || text == es
+}
 
 /**
  * Nomes padronizados evitam que a mesma tecnica apareca escrita de cinco jeitos
@@ -1474,13 +1495,56 @@ private data class SamplingPreset(val label: String, val protocol: String, val u
  * esforco entre expedicoes.
  */
 private val SAMPLING_PRESETS = listOf(
-    SamplingPreset("Busca ativa", "Busca ativa visual e auditiva", "hour", "2 pessoas × 3 h"),
-    SamplingPreset("Ponto de escuta", "Ponto de escuta (contagem por pontos)", "minute", "10 min por ponto, 8 pontos"),
-    SamplingPreset("Transecto", "Transecto linear", "metre", "500 m percorridos em 1 h"),
-    SamplingPreset("Parcela", "Parcela", "squareMetre", "parcela de 10 × 10 m"),
-    SamplingPreset("Pitfall", "Armadilhas de interceptação e queda (pitfall)", "trapNight", "20 baldes × 5 noites"),
-    SamplingPreset("Gravador automático", "Monitoramento acústico passivo (gravador automático)", "minute", "1 min a cada 15 min, 5 noites"),
-    SamplingPreset("Coleta botânica", "Coleta de material botânico", "", null)
+    SamplingPreset(
+        "Busca ativa",
+        Trilingual("Busca ativa visual e auditiva", "Visual and acoustic active search", "Búsqueda activa visual y auditiva"),
+        "hour",
+        Trilingual("2 pessoas × 3 h", "2 people × 3 h", "2 personas × 3 h")
+    ),
+    SamplingPreset(
+        "Ponto de escuta",
+        Trilingual("Ponto de escuta (contagem por pontos)", "Point count", "Conteo por puntos"),
+        "minute",
+        Trilingual("10 min por ponto, 8 pontos", "10 min per point, 8 points", "10 min por punto, 8 puntos")
+    ),
+    SamplingPreset(
+        "Transecto",
+        Trilingual("Transecto linear", "Line transect", "Transecto lineal"),
+        "metre",
+        Trilingual("500 m percorridos em 1 h", "500 m walked in 1 h", "500 m recorridos en 1 h")
+    ),
+    SamplingPreset(
+        "Parcela",
+        Trilingual("Parcela", "Plot", "Parcela"),
+        "squareMetre",
+        Trilingual("parcela de 10 × 10 m", "10 × 10 m plot", "parcela de 10 × 10 m")
+    ),
+    SamplingPreset(
+        "Pitfall",
+        Trilingual(
+            "Armadilhas de interceptação e queda (pitfall)",
+            "Pitfall traps with drift fences",
+            "Trampas de intercepción y caída (pitfall)"
+        ),
+        "trapNight",
+        Trilingual("20 baldes × 5 noites", "20 buckets × 5 nights", "20 baldes × 5 noches")
+    ),
+    SamplingPreset(
+        "Gravador automático",
+        Trilingual(
+            "Monitoramento acústico passivo (gravador automático)",
+            "Passive acoustic monitoring (autonomous recorder)",
+            "Monitoreo acústico pasivo (grabadora autónoma)"
+        ),
+        "minute",
+        Trilingual("1 min a cada 15 min, 5 noites", "1 min every 15 min, 5 nights", "1 min cada 15 min, 5 noches")
+    ),
+    SamplingPreset(
+        "Coleta botânica",
+        Trilingual("Coleta de material botânico", "Botanical specimen collection", "Colecta de material botánico"),
+        "",
+        null
+    )
 )
 
 /**
@@ -1893,10 +1957,15 @@ private fun TrackPanel(
             Text(
                 if (lastPoint == null) {
                     ui("Ao iniciar, o app grava o ponto de saída e atualiza a linha automaticamente a cada poucos segundos.")
-                } else if (LocalOikosLanguage.current == OikosLanguage.Portuguese) {
-                    "Último ponto: ${formatClock(lastPoint.timestamp)} - precisão ${lastPoint.accuracy?.let { "±${it.toInt()} m" } ?: "não informada"}. Atualização automática aproximada: ${profile.intervalMillis / 1000} s ou ${formatPlain(profile.minDistanceMeters.toDouble()).replace('.', ',')} m."
                 } else {
-                    "Last point: ${formatClock(lastPoint.timestamp)} - accuracy ${lastPoint.accuracy?.let { "±${it.toInt()} m" } ?: "not reported"}. Automatic update about every ${profile.intervalMillis / 1000} s or ${formatPlain(profile.minDistanceMeters.toDouble())} m."
+                    val accuracy = lastPoint.accuracy?.let { "±${it.toInt()} m" }
+                    val seconds = profile.intervalMillis / 1000
+                    val meters = formatPlain(profile.minDistanceMeters.toDouble())
+                    tr(
+                        "Último ponto: ${formatClock(lastPoint.timestamp)} - precisão ${accuracy ?: "não informada"}. Atualização automática aproximada: $seconds s ou ${meters.replace('.', ',')} m.",
+                        "Last point: ${formatClock(lastPoint.timestamp)} - accuracy ${accuracy ?: "not reported"}. Automatic update about every $seconds s or $meters m.",
+                        "Último punto: ${formatClock(lastPoint.timestamp)} - precisión ${accuracy ?: "no informada"}. Actualización automática aproximada: cada $seconds s o ${meters.replace('.', ',')} m."
+                    )
                 },
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -2613,7 +2682,7 @@ private fun OccurrenceEditScreen(
     // Um toque duplo salvava duas vezes (ou um registro vazio no meio da troca de rascunho).
     var saving by remember { mutableStateOf(false) }
     var locationInputError by remember { mutableStateOf<String?>(null) }
-    val portugueseUi = LocalOikosLanguage.current == OikosLanguage.Portuguese
+    val formLanguage = LocalOikosLanguage.current
     fun save(andNew: Boolean) {
                 if (saving || !form.initialized) return
                 if (viewModel.recording.value?.target?.draftKey == draftKey) {
@@ -2672,13 +2741,11 @@ private fun OccurrenceEditScreen(
                 if (faltando.isNotEmpty()) {
                     if (faltando.any { it.dwcTerm !in fixedOccurrenceTerms }) showAdvanced = true
                     viewModel.showMessage(
-                        if (portugueseUi) {
-                            "Preencha antes de salvar: " + faltando.joinToString(", ") { it.labelPt }
-                        } else {
-                            "Fill in before saving: " + faltando.joinToString(", ") { field ->
-                                field.labelEn.ifBlank { englishUiText(prettyPortugueseText(field.labelPt)) }
-                            }
-                        }
+                        when (formLanguage) {
+                            AppLanguage.PT -> "Preencha antes de salvar: "
+                            AppLanguage.EN -> "Fill in before saving: "
+                            AppLanguage.ES -> "Completa antes de guardar: "
+                        } + faltando.joinToString(", ") { field -> fieldLabelIn(field, formLanguage) }
                     )
                 } else {
                     val pending = form.pendingMedia
@@ -2819,7 +2886,11 @@ private fun OccurrenceEditScreen(
             if (enabled("behavior", enabledFields)) TextInput(label("behavior", enabledFields, "Comportamento"), behavior) { behavior = it }
             if (enabled("reproductiveCondition", enabledFields)) TextInput(label("reproductiveCondition", enabledFields, "Condição reprodutiva"), reproductive) { reproductive = it }
             if (enabled("recordedBy", enabledFields)) TextInput(label("recordedBy", enabledFields, "Quem coletou"), recordedBy, help = if (recordedBy.isBlank() && !session?.recordedBy.isNullOrBlank()) {
-                if (portugueseUi) "Em branco, a exportação usa o coletor da expedição: ${session?.recordedBy}." else "If blank, the export uses the expedition collector: ${session?.recordedBy}."
+                tr(
+                    "Em branco, a exportação usa o coletor da expedição: ${session?.recordedBy}.",
+                    "If blank, the export uses the expedition collector: ${session?.recordedBy}.",
+                    "En blanco, la exportación usa el colector de la salida de campo: ${session?.recordedBy}."
+                )
             } else null) { recordedBy = it }
             if (enabled("identifiedBy", enabledFields)) TextInput(label("identifiedBy", enabledFields, "Quem identificou"), identifiedBy) { identifiedBy = it }
             if (enabled("dateIdentified", enabledFields)) DateInput(label("dateIdentified", enabledFields, "Data da identificação"), dateIdentified) { dateIdentified = it }
@@ -2835,7 +2906,7 @@ private fun OccurrenceEditScreen(
                     // Altitude do GPS ja convertida para o nivel do mar pelo EGM2008.
                     dynamicValues["verticalDatum"] = if (fix.altitude != null) Geoid.VERTICAL_DATUM else ""
                     dynamicValues["georeferenceProtocol"] = GpsAveraging.GBIF_PROTOCOL
-                    dynamicValues["georeferenceRemarks"] = fix.remarks(english = project.isEnglishData())
+                    dynamicValues["georeferenceRemarks"] = fix.remarks(project.dataLanguage())
                 }
             }
             // Coordenada digitada a mao invalida a descricao automatica de como
@@ -2868,7 +2939,7 @@ private fun OccurrenceEditScreen(
                             accuracy = formatPlain(GpsAveraging.uncertaintyFor(it.accuracyMeters))
                             dynamicValues["verticalDatum"] = if (it.altitude != null) Geoid.VERTICAL_DATUM else ""
                             dynamicValues["georeferenceProtocol"] = GpsAveraging.GBIF_PROTOCOL
-                            dynamicValues["georeferenceRemarks"] = singleFixRemarks(it.accuracyMeters, project.isEnglishData())
+                            dynamicValues["georeferenceRemarks"] = singleFixRemarks(it.accuracyMeters, project.dataLanguage())
                         }
                     }
                 }
@@ -2910,18 +2981,25 @@ private fun OccurrenceEditScreen(
     }
 }
 
-/** Inicios das observacoes de georreferenciamento que o app escreve (pt e en). */
-private val AUTOMATIC_GPS_REMARKS = listOf("Média de", "Leitura única do GNSS do celular", "Mean of", "Single phone GNSS reading")
+/** Inicios das observacoes de georreferenciamento que o app escreve (pt, en e es). */
+private val AUTOMATIC_GPS_REMARKS = listOf(
+    "Média de", "Leitura única do GNSS do celular",
+    "Mean of", "Single phone GNSS reading",
+    "Promedio de", "Lectura única del GNSS del celular"
+)
 
 private fun isAutomaticGpsRemarks(text: String): Boolean = AUTOMATIC_GPS_REMARKS.any { text.startsWith(it) }
 
 /** Dado gravado no registro: segue o idioma do projeto, nao o da tela. */
-private fun ProjectEntity?.isEnglishData(): Boolean = this?.language?.startsWith("en", ignoreCase = true) == true
+private fun ProjectEntity?.dataLanguage(): AppLanguage = AppLanguage.ofProject(this?.language ?: "pt")
 
-private fun singleFixRemarks(accuracyMeters: Double?, english: Boolean): String {
+private fun singleFixRemarks(accuracyMeters: Double?, language: AppLanguage): String {
     val accuracy = accuracyMeters?.let { formatPlain(it) + " m" }
-    return if (english) "Single phone GNSS reading; reported accuracy ${accuracy ?: "not reported"}; uncertainty = 2 × accuracy."
-    else "Leitura única do GNSS do celular; precisão informada ${accuracy ?: "não informada"}; incerteza = 2 × precisão."
+    return when (language) {
+        AppLanguage.EN -> "Single phone GNSS reading; reported accuracy ${accuracy ?: "not reported"}; uncertainty = 2 × accuracy."
+        AppLanguage.ES -> "Lectura única del GNSS del celular; precisión informada ${accuracy ?: "no informada"}; incertidumbre = 2 × precisión."
+        AppLanguage.PT -> "Leitura única do GNSS do celular; precisão informada ${accuracy ?: "não informada"}; incerteza = 2 × precisão."
+    }
 }
 
 private fun hasAnyLocationPermission(context: Context): Boolean =
@@ -3128,7 +3206,6 @@ private fun ExportScreen(viewModel: AppViewModel, projectId: Long, sessionId: Lo
     val exportProject by remember(viewModel, projectId) { viewModel.observeProject(projectId) }.collectAsState(initial = null)
     // Pastas do ZIP no idioma do projeto; o texto, no idioma da tela.
     val paths = com.oikos.fieldbook.export.ExportPaths.of(exportProject?.language ?: "pt")
-    val portugueseUi = LocalOikosLanguage.current == OikosLanguage.Portuguese
     Scaffold(modifier = modifier, topBar = { OikosTopBar(if (sessionId == null) "Exportar projeto" else "Exportar expedição", onBack) }) { padding ->
         Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(ui("Exportar dados"), style = MaterialTheme.typography.titleLarge)
@@ -3136,19 +3213,19 @@ private fun ExportScreen(viewModel: AppViewModel, projectId: Long, sessionId: Lo
             Text(ui("Para não perder o vínculo entre fotos, áudios e registros, recomendamos exportar como ZIP completo."))
             HelpCard(
                 "ZIP organizado",
-                if (portugueseUi) {
-                    "O ZIP cria ${paths.main}, ${paths.support}, ${paths.gis}, ${paths.dwca} e ${paths.media}. A planilha principal reúne as ocorrências do escopo escolhido com os campos Darwin Core e os campos configurados no projeto."
-                } else {
-                    "The ZIP creates ${paths.main}, ${paths.support}, ${paths.gis}, ${paths.dwca} and ${paths.media}. The main spreadsheet gathers the occurrences in the chosen scope with the Darwin Core fields and the fields configured in the project."
-                }
+                tr(
+                    "O ZIP cria ${paths.main}, ${paths.support}, ${paths.gis}, ${paths.dwca} e ${paths.media}. A planilha principal reúne as ocorrências do escopo escolhido com os campos Darwin Core e os campos configurados no projeto.",
+                    "The ZIP creates ${paths.main}, ${paths.support}, ${paths.gis}, ${paths.dwca} and ${paths.media}. The main spreadsheet gathers the occurrences in the chosen scope with the Darwin Core fields and the fields configured in the project.",
+                    "El ZIP crea ${paths.main}, ${paths.support}, ${paths.gis}, ${paths.dwca} y ${paths.media}. La planilla principal reúne los registros del alcance elegido con los campos Darwin Core y los campos configurados en el proyecto."
+                )
             )
             HelpCard(
                 "Trilhas GPS",
-                if (portugueseUi) {
-                    "O ZIP completo inclui ${paths.trackCsv} e o GeoJSON inclui a trilha da expedição como LineString. No QGIS, estilize featureType=expeditionTrack em laranja para ver o percurso."
-                } else {
-                    "The full ZIP includes ${paths.trackCsv}, and the GeoJSON includes the expedition track as a LineString. In QGIS, style featureType=expeditionTrack in orange to see the route."
-                }
+                tr(
+                    "O ZIP completo inclui ${paths.trackCsv} e o GeoJSON inclui a trilha da expedição como LineString. No QGIS, estilize featureType=expeditionTrack em laranja para ver o percurso.",
+                    "The full ZIP includes ${paths.trackCsv}, and the GeoJSON includes the expedition track as a LineString. In QGIS, style featureType=expeditionTrack in orange to see the route.",
+                    "El ZIP completo incluye ${paths.trackCsv} y el GeoJSON incluye el recorrido de la salida de campo como LineString. En QGIS, aplica a featureType=expeditionTrack un estilo naranja para ver el trayecto."
+                )
             )
             Text(ui("Conteúdo"), style = MaterialTheme.typography.titleMedium)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -4015,7 +4092,7 @@ private fun SettingsScreen(
                     Text(ui("Automático segue o idioma do celular."), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     ChipRow(
                         "Idioma",
-                        listOf("auto" to "Automático", "pt" to "Português", "en" to "English"),
+                        listOf("auto" to "Automático", "pt" to "Português", "en" to "English", "es" to "Español"),
                         languageMode,
                         onLanguageModeChange
                     )
@@ -4239,7 +4316,7 @@ private fun installedSummary(checklist: ChecklistEntity): String {
     return listOfNotNull(
         "${ui("Instalada")}: ${ui("versão")} ${checklist.version.ifBlank { "?" }}",
         date.takeIf { it.isNotBlank() }?.let { "${ui("publicada em")} $it" },
-        "${String.format(if (LocalOikosLanguage.current == OikosLanguage.Portuguese) Locale.forLanguageTag("pt-BR") else Locale.US, "%,d", checklist.taxonCount)} ${ui("nomes")}",
+        "${String.format(LocalOikosLanguage.current.locale, "%,d", checklist.taxonCount)} ${ui("nomes")}",
         checklist.license.takeIf { it.isNotBlank() }
     ).joinToString(" · ")
 }
@@ -4364,7 +4441,7 @@ private fun TallyScreen(
                     altitude = form["alt"].toDoubleOrNull(),
                     coordinateUncertaintyInMeters = form["accuracy"].toDoubleOrNull(),
                     geodeticDatum = currentSession.geodeticDatum,
-                    fieldNotes = "Contagem rápida",
+                    fieldNotes = inProjectLanguage(currentProject.language, "Contagem rápida", "Quick count", "Conteo rápido"),
                     dynamicFieldsJson = flatJson(row.fields.filterValues { it.isNotBlank() } + georeference + mapOf("eventDate" to eventDate, "eventTime" to eventTime)),
                     createdAt = end + index,
                     updatedAt = end + index
@@ -4386,7 +4463,7 @@ private fun TallyScreen(
             form["alt"] = fix.altitude?.let { formatPlain(it) }.orEmpty()
             form["accuracy"] = formatPlain(fix.uncertainty)
             form["protocol"] = GpsAveraging.GBIF_PROTOCOL
-            form["georemarks"] = fix.remarks(english = project.isEnglishData())
+            form["georemarks"] = fix.remarks(project.dataLanguage())
         }
     }
 
@@ -4445,7 +4522,7 @@ private fun TallyScreen(
                                     form["alt"] = it.altitude?.let { value -> formatPlain(value) }.orEmpty()
                                     form["accuracy"] = formatPlain(GpsAveraging.uncertaintyFor(it.accuracyMeters))
                                     form["protocol"] = GpsAveraging.GBIF_PROTOCOL
-                                    form["georemarks"] = singleFixRemarks(it.accuracyMeters, project.isEnglishData())
+                                    form["georemarks"] = singleFixRemarks(it.accuracyMeters, project.dataLanguage())
                                 }
                             }
                         }
@@ -4783,29 +4860,34 @@ private fun ScientificNameField(
  */
 @Composable
 private fun distributionSummary(d: com.oikos.fieldbook.checklist.TaxonDistribution): String {
-    val pt = LocalOikosLanguage.current == OikosLanguage.Portuguese
+    val language = LocalOikosLanguage.current
+    fun say(pt: String, en: String, es: String) = when (language) {
+        AppLanguage.PT -> pt
+        AppLanguage.EN -> en
+        AppLanguage.ES -> es
+    }
     val origin = d.establishment.mapNotNull { code ->
         when (code) {
-            "native" -> if (pt) "Nativa" else "Native"
-            "introduced" -> if (pt) "Introduzida" else "Introduced"
-            "cultivated" -> if (pt) "Cultivada" else "Cultivated"
-            "naturalized" -> if (pt) "Naturalizada" else "Naturalized"
-            "uncertain" -> if (pt) "Origem incerta" else "Uncertain origin"
+            "native" -> say("Nativa", "Native", "Nativa")
+            "introduced" -> say("Introduzida", "Introduced", "Introducida")
+            "cultivated" -> say("Cultivada", "Cultivated", "Cultivada")
+            "naturalized" -> say("Naturalizada", "Naturalized", "Naturalizada")
+            "uncertain" -> say("Origem incerta", "Uncertain origin", "Origen incierto")
             else -> null
         }
     }.joinToString(", ")
-    val endemic = if (d.endemic == true) (if (pt) "Endêmica do Brasil" else "Endemic to Brazil") else ""
+    val endemic = if (d.endemic == true) say("Endêmica do Brasil", "Endemic to Brazil", "Endémica de Brasil") else ""
     val domains = d.domains.joinToString(", ") { domain ->
-        if (pt) domain else when (domain) {
-            "Amazônia" -> "Amazon"
-            "Mata Atlântica" -> "Atlantic Forest"
+        when (domain) {
+            "Amazônia" -> say(domain, "Amazon", "Amazonia")
+            "Mata Atlântica" -> say(domain, "Atlantic Forest", "Bosque Atlántico")
             else -> domain
         }
     }
     val states = when {
         d.states.isEmpty() -> ""
-        d.states.size >= 27 -> if (pt) "todos os estados" else "all states"
-        d.states.size > 8 -> if (pt) "${d.states.size} estados" else "${d.states.size} states"
+        d.states.size >= 27 -> say("todos os estados", "all states", "todos los estados")
+        d.states.size > 8 -> say("${d.states.size} estados", "${d.states.size} states", "${d.states.size} estados")
         else -> d.states.joinToString(", ")
     }
     return listOf(endemic.ifBlank { origin }, domains, states).filter { it.isNotBlank() }.joinToString(" · ")
@@ -4874,7 +4956,7 @@ private fun ImportPackageButton(viewModel: AppViewModel, projects: List<ProjectE
                 .onSuccess { manifest -> pending = PendingImport(uri, manifest, received) }
                 .onFailure {
                     received?.delete()
-                    viewModel.showMessage(com.oikos.fieldbook.util.UiLanguage.t("Não foi possível abrir o pacote: ${it.message}", "Could not open the package: ${it.message}"))
+                    viewModel.showMessage(com.oikos.fieldbook.util.UiLanguage.t("Não foi possível abrir o pacote: ${it.message}", "Could not open the package: ${it.message}", "No se pudo abrir el paquete: ${it.message}"))
                 }
         }
     }
@@ -5043,7 +5125,7 @@ private fun ImportPackageDialogs(
             dismissButton = { TextButton(onClick = onCancel) { Text(ui("Cancelar")) } }
         )
     } else {
-        val portuguese = LocalOikosLanguage.current == OikosLanguage.Portuguese
+        val language = LocalOikosLanguage.current
         AlertDialog(
             onDismissRequest = {},
             title = { Text(ui("Diferentes nos dois celulares")) },
@@ -5069,7 +5151,7 @@ private fun ImportPackageDialogs(
                             )
                             if (conflict.subtitle.isNotBlank()) Text(conflict.subtitle, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             conflict.differences.take(MAX_DIFFERENCES_SHOWN).forEach { difference ->
-                                Text(transferFieldLabel(difference.column, portuguese), style = MaterialTheme.typography.labelLarge)
+                                Text(transferFieldLabel(difference.column, language), style = MaterialTheme.typography.labelLarge)
                                 Text("${ui("Este celular")}: ${transferValueText(difference.local)}", style = MaterialTheme.typography.bodySmall)
                                 Text("${ui("Recebido")}: ${transferValueText(difference.incoming)}", style = MaterialTheme.typography.bodySmall)
                             }
@@ -5100,24 +5182,34 @@ private fun ImportPackageDialogs(
 private const val MAX_DIFFERENCES_SHOWN = 8
 
 /** Nome do campo em conflito: rotulo do Darwin Core ou dos campos proprios do Oikos. */
-private fun transferFieldLabel(column: String, portuguese: Boolean): String {
+private fun transferFieldLabel(column: String, language: AppLanguage): String {
     val term = column.removePrefix("dyn:")
-    DarwinCoreCatalog.allFields.firstOrNull { it.term == term }?.let { return if (portuguese) it.labelPt else it.labelEn }
-    val (pt, en) = when (term) {
-        "name" -> "Nome da expedição" to "Expedition name"
-        "startTime" -> "Hora de início" to "Start time"
-        "endTime" -> "Hora de término" to "End time"
-        "fieldTeam" -> "Equipe" to "Field team"
-        "gpsTrackEnabled" -> "Trilha GPS" to "GPS track"
-        "notes" -> "Observações" to "Notes"
-        "fieldNotes" -> "Notas de campo" to "Field notes"
-        "formType" -> "Tipo de ficha" to "Form type"
-        "occurrenceType" -> "Tipo de registro" to "Record type"
-        "environmentType" -> "Tipo de ambiente" to "Environment type"
-        "coordinateCapturedAt" -> "Hora da coordenada" to "Coordinate time"
-        else -> term to term
+    DarwinCoreCatalog.allFields.firstOrNull { it.term == term }?.let {
+        return when (language) {
+            AppLanguage.PT -> it.labelPt
+            AppLanguage.EN -> it.labelEn
+            AppLanguage.ES -> spanishFieldLabels[term] ?: it.labelEn
+        }
     }
-    return if (portuguese) pt else en
+    val (pt, en, es) = when (term) {
+        "name" -> Triple("Nome da expedição", "Expedition name", "Nombre de la salida de campo")
+        "startTime" -> Triple("Hora de início", "Start time", "Hora de inicio")
+        "endTime" -> Triple("Hora de término", "End time", "Hora de término")
+        "fieldTeam" -> Triple("Equipe", "Field team", "Equipo de campo")
+        "gpsTrackEnabled" -> Triple("Trilha GPS", "GPS track", "Recorrido GPS")
+        "notes" -> Triple("Observações", "Notes", "Observaciones")
+        "fieldNotes" -> Triple("Notas de campo", "Field notes", "Notas de campo")
+        "formType" -> Triple("Tipo de ficha", "Form type", "Tipo de ficha")
+        "occurrenceType" -> Triple("Tipo de registro", "Record type", "Tipo de registro")
+        "environmentType" -> Triple("Tipo de ambiente", "Environment type", "Tipo de ambiente")
+        "coordinateCapturedAt" -> Triple("Hora da coordenada", "Coordinate time", "Hora de la coordenada")
+        else -> Triple(term, term, term)
+    }
+    return when (language) {
+        AppLanguage.PT -> pt
+        AppLanguage.EN -> en
+        AppLanguage.ES -> es
+    }
 }
 
 @Composable
@@ -5139,7 +5231,7 @@ private fun rememberNearbyPermissions(viewModel: AppViewModel, onGranted: () -> 
         else viewModel.showMessage(
             com.oikos.fieldbook.util.UiLanguage.t(
                 "Sem a permissão de dispositivos próximos o envio direto não funciona. Você ainda pode usar o pacote por WhatsApp, Drive ou cabo.",
-                "Without the nearby devices permission, direct transfer does not work. You can still use the package via WhatsApp, Drive or cable."
+                "Without the nearby devices permission, direct transfer does not work. You can still use the package via WhatsApp, Drive or cable.", "Sin el permiso de dispositivos cercanos el envío directo no funciona. Aún puedes usar el paquete por WhatsApp, Drive o cable."
             )
         )
     }
@@ -5171,10 +5263,10 @@ private fun TransferProgress(bytes: Long, total: Long) {
     Text(ui("Não feche esta tela até terminar."), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
-/** "3,4 MB" no app em portugues e "3.4 MB" em ingles, seja qual for o idioma do aparelho. */
+/** "3,4 MB" no app em portugues ou espanhol e "3.4 MB" em ingles, seja qual for o idioma do aparelho. */
 private fun formatMegabytes(bytes: Long): String =
     String.format(
-        if (com.oikos.fieldbook.util.UiLanguage.isPortuguese) Locale("pt", "BR") else Locale.US,
+        com.oikos.fieldbook.util.UiLanguage.current.locale,
         "%.1f MB",
         bytes / (1024.0 * 1024.0)
     )
@@ -5488,9 +5580,9 @@ private fun BackupCard(viewModel: AppViewModel) {
             text = {
                 Text(
                     "${ui("Feito em")} ${formatBackupDate(manifest.createdAt)} (${ui("versão")} ${manifest.appVersion}): " +
-                        UiLanguage.count(manifest.projects, "projeto", "projetos", "project", "projects") + ", " +
-                        UiLanguage.count(manifest.occurrences, "ocorrência", "ocorrências", "occurrence", "occurrences") + ", " +
-                        UiLanguage.count(manifest.mediaFiles, "mídia", "mídias", "media file", "media files") +
+                        UiLanguage.count(manifest.projects, "projeto", "projetos", "project", "projects", "proyecto", "proyectos") + ", " +
+                        UiLanguage.count(manifest.occurrences, "ocorrência", "ocorrências", "occurrence", "occurrences", "registro", "registros") + ", " +
+                        UiLanguage.count(manifest.mediaFiles, "mídia", "mídias", "media file", "media files", "archivo multimedia", "archivos multimedia") +
                         " (${humanSize(manifest.mediaBytes)}).\n\n" +
                         ui("Todos os dados atuais deste aparelho serão substituídos pelos do backup. O app vai fechar e abrir de novo para concluir.") +
                         "\n\n" + ui("As listas de espécies já instaladas neste aparelho são mantidas.")
@@ -5819,719 +5911,36 @@ private fun NetworkPrivacyCard() {
 }
 
 @Composable
-private fun ui(portuguese: String): String =
-    if (LocalOikosLanguage.current == OikosLanguage.Portuguese) portuguese else englishUiText(portuguese)
+private fun ui(portuguese: String): String = uiText(portuguese, LocalOikosLanguage.current)
+
+/** Texto montado na hora (com valores dentro), escrito nos tres idiomas. */
+@Composable
+private fun tr(pt: String, en: String, es: String): String = when (LocalOikosLanguage.current) {
+    AppLanguage.PT -> pt
+    AppLanguage.EN -> en
+    AppLanguage.ES -> es
+}
+
+/** Texto fixo da tela no idioma pedido; sem traducao, fica o portugues. */
+private fun uiText(portuguese: String, language: AppLanguage): String = when (language) {
+    AppLanguage.PT -> portuguese
+    AppLanguage.EN -> englishUiText(portuguese)
+    AppLanguage.ES -> spanishText[portuguese] ?: portuguese
+}
 
 @Composable
-private fun fieldDisplayLabel(field: FieldConfigEntity): String =
-    if (LocalOikosLanguage.current == OikosLanguage.Portuguese) {
-        prettyPortugueseText(field.labelPt)
-    } else {
-        field.labelEn.ifBlank { englishUiText(prettyPortugueseText(field.labelPt)) }
-    }
+private fun fieldDisplayLabel(field: FieldConfigEntity): String = fieldLabelIn(field, LocalOikosLanguage.current)
+
+private fun fieldLabelIn(field: FieldConfigEntity, language: AppLanguage): String = when (language) {
+    AppLanguage.PT -> prettyPortugueseText(field.labelPt)
+    AppLanguage.EN -> field.labelEn.ifBlank { englishUiText(prettyPortugueseText(field.labelPt)) }
+    AppLanguage.ES -> spanishFieldLabels[field.dwcTerm]
+        ?: spanishText[prettyPortugueseText(field.labelPt)]
+        ?: field.labelEn.ifBlank { prettyPortugueseText(field.labelPt) }
+}
 
 private fun englishUiText(portuguese: String): String = englishText[portuguese] ?: portuguese
 
-private val englishText = mapOf(
-    "Voltar" to "Back",
-    "Configurações" to "Settings",
-    "Sobre" to "About",
-    "Novo projeto" to "New project",
-    "Editar projeto" to "Edit project",
-    "Salvar" to "Save",
-    "Idioma" to "Language",
-    "Automático" to "Automatic",
-    "Português" to "Portuguese",
-    "Idioma do aplicativo" to "App language",
-    "Automático segue o idioma do celular." to "Automatic follows the phone language.",
-    "Caderno de Campo Digital" to "Digital Field Notebook",
-    "Registre expedições, ocorrências, GPS, fotos e áudios com exportação Darwin Core." to "Record expeditions, occurrences, GPS, photos and audio with Darwin Core export.",
-    "Criar projeto" to "Create project",
-    "Abrir projeto" to "Open project",
-    "Nenhum projeto ainda." to "No projects yet.",
-    "Crie um projeto de pesquisa para começar a coletar offline." to "Create a research project to start collecting offline.",
-    "Apagar projeto" to "Delete project",
-    "Apagar projeto?" to "Delete project?",
-    "Isso remove o projeto, suas expedições, ocorrências, trilhas e mídias salvas neste aparelho." to "This removes the project, its expeditions, occurrences, tracks and media saved on this device.",
-    "Isso remove o projeto inteiro, incluindo expedições, ocorrências, trilhas e mídias locais." to "This removes the entire project, including expeditions, occurrences, tracks and local media.",
-    "Nome do projeto" to "Project name",
-    "Descrição" to "Description",
-    "Instituição" to "Institution",
-    "Responsáveis" to "Researchers",
-    "Idioma" to "Language",
-    "Português" to "Portuguese",
-    "Datum padrão" to "Default datum",
-    "Formato de coordenadas" to "Coordinate format",
-    "Graus Decimais" to "Decimal Degrees",
-    "Qualidade da foto" to "Photo quality",
-    "Baixa" to "Low",
-    "Media" to "Medium",
-    "Alta" to "High",
-    "Formato do áudio" to "Audio format",
-    "Módulos do projeto" to "Project modules",
-    "Escolha os grupos que este projeto pode registrar. Na ocorrência, o app mostra primeiro o grupo e depois apenas o questionário específico." to "Choose which groups this project can record. In an occurrence, the app first asks the group and then shows only that specific form.",
-    "Animais observados, capturados, ouvidos, vestígios e armadilhas fotográficas." to "Observed, captured or heard animals, traces and camera traps.",
-    "Flora, partes de plantas, flor, fruto, caule, folha e dados botânicos." to "Flora, plant parts, flowers, fruits, stems, leaves and botanical data.",
-    "Funga, substrato, corpo de frutificação, associações e observações micológicas." to "Funga, substrate, fruiting bodies, associations and mycological notes.",
-    "Fauna" to "Fauna",
-    "Flora" to "Flora",
-    "Funga" to "Funga",
-    "Toque para recolher campos" to "Tap to collapse fields",
-    "Toque para escolher campos deste módulo" to "Tap to choose fields for this module",
-    "Salve o projeto para gerar estes campos." to "Save the project to generate these fields.",
-    "Projeto" to "Project",
-    "Editar" to "Edit",
-    "Campos" to "Fields",
-    "Exportar" to "Export",
-    "Nova expedição" to "New expedition",
-    "Expedições" to "Expeditions",
-    "expedições" to "expeditions",
-    "expedição" to "expedition",
-    "Reino" to "Kingdom",
-    "Filo" to "Phylum",
-    "Subfilo" to "Subphylum",
-    "Classe" to "Class",
-    "Subclasse" to "Subclass",
-    "Ordem" to "Order",
-    "Subordem" to "Suborder",
-    "Infraordem" to "Infraorder",
-    "Superfamília" to "Superfamily",
-    "Família" to "Family",
-    "Subfamília" to "Subfamily",
-    "Tribo" to "Tribe",
-    "Subtribo" to "Subtribe",
-    "Gênero" to "Genus",
-    "Subgênero" to "Subgenus",
-    "Espécie" to "Species",
-    "Subespécie" to "Subspecies",
-    "Variedade" to "Variety",
-    "Forma" to "Form",
-    "foto" to "photo",
-    "fotos" to "photos",
-    "áudio" to "recording",
-    "áudios" to "recordings",
-    "ponto da trilha" to "track point",
-    "pontos da trilha" to "track points",
-    "ocorrência com GPS" to "occurrence with GPS",
-    "ocorrências com GPS" to "occurrences with GPS",
-    "Sem expedições." to "No expeditions.",
-    "Crie uma expedição para agrupar as ocorrências de campo." to "Create an expedition to group field occurrences.",
-    "Apagar expedição" to "Delete expedition",
-    "Apagar expedição?" to "Delete expedition?",
-    "Isso remove a expedição, suas ocorrências, trilhas e mídias vinculadas." to "This removes the expedition, its occurrences, tracks and linked media.",
-    "Isso remove a expedição atual, suas ocorrências, trilhas e mídias vinculadas." to "This removes the current expedition, its occurrences, tracks and linked media.",
-    "Campos Darwin Core" to "Darwin Core Fields",
-    "Obrig." to "Req.",
-    "Nova ocorrência" to "New occurrence",
-    "Editar ocorrência" to "Edit occurrence",
-    "Nova expedição" to "New expedition",
-    "Editar expedição" to "Edit expedition",
-    "Nome da expedição" to "Expedition name",
-    "Data" to "Date",
-    "Selecionar data" to "Select date",
-    "Selecionar hora" to "Select time",
-    "Salvo no padrão científico AAAA-MM-DD para evitar confusão entre datas brasileiras e norte-americanas." to "Saved in the scientific YYYY-MM-DD standard to avoid confusion between Brazilian and North American date formats.",
-    "Hora de início" to "Start time",
-    "Hora de término" to "End time",
-    "Localidade" to "Locality",
-    "Município" to "Municipality",
-    "Estado" to "State",
-    "País" to "Country",
-    "Habitat geral" to "General habitat",
-    "Tipo de ambiente" to "Environment type",
-    "Método de amostragem" to "Sampling method",
-    "Esforço amostral" to "Sampling effort",
-    "Tempo, distância ou método usado na coleta. Exemplo: 2 horas de busca ativa." to "Time, distance or method used in sampling. Example: 2 hours of active search.",
-    "Equipe de campo" to "Field team",
-    "Coletor principal" to "Main collector",
-    "Registrar trilha da expedição" to "Record expedition track",
-    "Salva o percurso geral da expedição para exportar como LineString." to "Saves the expedition route for export as a LineString.",
-    "Observações gerais" to "General notes",
-    "Expedição é uma saída de campo, dia de coleta ou campanha. Internamente ela continua como Darwin Core Event." to "An expedition is a field trip, sampling day or campaign. Internally it is still a Darwin Core Event.",
-    "Expedição" to "Expedition",
-    "Mídias" to "Media",
-    "Exportar expedição" to "Export expedition",
-    "Ocorrências" to "Occurrences",
-    "registros nesta expedição" to "records in this expedition",
-    "Registro" to "Record",
-    "Sem ocorrências." to "No occurrences.",
-    "Adicione espécies, coordenadas, fotos e áudios nesta expedição." to "Add species, coordinates, photos and audio to this expedition.",
-    "Apagar ocorrência" to "Delete occurrence",
-    "Apagar ocorrência?" to "Delete occurrence?",
-    "Isso remove o registro e as fotos/áudios vinculados a ele." to "This removes the record and its linked photos/audio.",
-    "Isso remove este registro e as fotos/áudios vinculados a ele." to "This removes this record and its linked photos/audio.",
-    "Ocorrência sem nome científico" to "Occurrence without scientific name",
-    "Trilha GPS da expedição" to "Expedition GPS track",
-    "Uso de localização na trilha" to "Track location use",
-    "Enquanto a trilha estiver ativa, o Oikos FieldBook usa sua localização para registrar o percurso da expedição, mesmo com a tela bloqueada ou o app em segundo plano. Uma notificação permanente será exibida. A localização é salva apenas no aparelho e nas exportações que você gerar." to "While the track is active, Oikos FieldBook uses your location to record the expedition route, even with the screen locked or the app in the background. A persistent notification will be shown. Location data is saved only on the device and in exports you create.",
-    "Continuar e iniciar trilha" to "Continue and start track",
-    "Atualizar agora" to "Update now",
-    "Iniciar trilha" to "Start track",
-    "Registrando em segundo plano. A linha laranja é a trilha base; pontos das ocorrências aparecem por cima." to "Recording in the background. The orange line is the track; occurrence points appear on top.",
-    "Inicie a trilha para acompanhar o percurso contínuo da expedição." to "Start the track to follow the expedition route.",
-    "Ativa" to "Active",
-    "Parada" to "Stopped",
-    "Parar" to "Stop",
-    "Centralizar" to "Center",
-    "Centralizar usuário" to "Center user",
-    "Ver mapa" to "View map",
-    "Fechar" to "Close",
-    "Fechar mapa" to "Close map",
-    "Importar trilha" to "Import track",
-    "Mapa da expedição" to "Expedition map",
-    "N do mapa" to "Map N",
-    "norte do mapa" to "map north",
-    "N verdadeiro" to "True N",
-    "bússola do celular" to "phone compass",
-    "Seta laranja: direção do usuário. N do mapa: topo do mapa. N verdadeiro: norte pela bússola do celular." to "Orange arrow: user heading. Map N: top of the map. True N: north from the phone compass.",
-    "O ponteiro laranja mostra onde você está e para onde aponta. Gire o mapa com dois dedos; o N indica o norte." to "The orange pointer shows where you are and which way you face. Rotate the map with two fingers; the N marks north.",
-    "Mapa OpenStreetMap" to "OpenStreetMap map",
-    "A trilha laranja aparece quando houver pontos de GPS." to "The orange track appears when GPS points are available.",
-    "Grupo do registro" to "Record group",
-    "Tipo de ocorrência" to "Occurrence type",
-    "Data do registro" to "Record date",
-    "Hora do registro" to "Record time",
-    "Registro científico" to "Scientific record",
-    "Identificador Darwin Core occurrenceID. É gerado automaticamente; edite apenas se precisar casar com um identificador externo." to "Darwin Core occurrenceID. It is generated automatically; edit it only if it must match an external identifier.",
-    "Registro de campo" to "Field record",
-    "Código amigável do ponto ou registro. Exemplo: P03, T1-P03 ou Registro #0003." to "Friendly point or record code. Example: P03, T1-P03 or Record #0003.",
-    "Nome da espécie" to "Species name",
-    "Use o nome científico da espécie, se souber. Exemplo: Boana faber." to "Use the species scientific name, if known. Example: Boana faber.",
-    "Nome popular" to "Common name",
-    "Status da ocorrência" to "Occurrence status",
-    "Número de indivíduos" to "Number of individuals",
-    "Sexo" to "Sex",
-    "Fase de vida" to "Life stage",
-    "Comportamento" to "Behavior",
-    "Condição reprodutiva" to "Reproductive condition",
-    "Quem coletou" to "Recorded by",
-    "Quem identificou" to "Identified by",
-    "Data da identificação" to "Identification date",
-    "Observações da ocorrência" to "Occurrence notes",
-    "Anotações de campo" to "Field notes",
-    "Use para anotações rápidas, descrição detalhada, dúvidas de identificação, observações de laboratório ou coleção." to "Use for quick notes, detailed description, identification questions, lab or collection notes.",
-    "Ocultar campos avançados" to "Hide advanced fields",
-    "Mostrar campos avançados" to "Show advanced fields",
-    "Campos Darwin Core extras" to "Extra Darwin Core fields",
-    "Mídias da ocorrência" to "Occurrence media",
-    "Miniatura da foto" to "Photo thumbnail",
-    "Registro de ocorrência" to "Occurrence record",
-    "Registro é cada espécie, indivíduo, som, foto, vestígio ou observação feita em campo." to "A record is each species, individual, sound, photo, trace or observation made in the field.",
-    "Registro é cada espécie, indivíduo, som, foto, vestígio ou observação feita dentro da expedição." to "A record is each species, individual, sound, photo, trace or observation made within the expedition.",
-    "Mídias vinculadas" to "Linked media",
-    "Use mídias para registrar fotos e áudios ligados a esta ocorrência antes de salvar." to "Use media to record photos and audio linked to this occurrence before saving.",
-    "Use mídias para registrar fotos e áudios ligados a esta ocorrência. A exportação preserva occurrenceID/eventID e associatedMedia." to "Use media to record photos and audio linked to this occurrence. Export preserves occurrenceID/eventID and associatedMedia.",
-    "Use mídias para registrar fotos e áudios ligados a esta ocorrência ou à expedição. A exportação preserva occurrenceID/eventID e associatedMedia." to "Use media to record photos and audio linked to this occurrence or expedition. Export preserves occurrenceID/eventID and associatedMedia.",
-    "Esta galeria reúne fotos e áudios da expedição, incluindo mídias vinculadas aos registros. Toque em uma mídia para editar o que ela mostra e sua descrição individual." to "This gallery brings together photos and audio from the expedition, including media linked to records. Tap a media item to edit what it shows and its individual description.",
-    "Fotos e áudios ficam ligados ao projeto, expedição e occurrenceID quando houver ocorrência." to "Photos and audio stay linked to the project, expedition and occurrenceID when an occurrence exists.",
-    "Fotos e áudios ficam ligados ao projeto, expedição e occurrenceID/eventID. A exportação preserva associatedMedia." to "Photos and audio stay linked to the project, expedition and occurrenceID/eventID. Export preserves associatedMedia.",
-    "Não foi possível iniciar a gravação de áudio." to "Could not start audio recording.",
-    "Permissão de câmera negada." to "Camera permission denied.",
-    "Permissão de áudio negada." to "Audio permission denied.",
-    "Mídias da expedição" to "Expedition media",
-    "O que esta mídia mostra ou registra?" to "What does this media show or record?",
-    "Exemplos: indivíduo inteiro, folha, flor, microhabitat, canto reprodutivo, chamado territorial, observação narrada." to "Examples: whole individual, leaf, flower, microhabitat, reproductive call, territorial call, narrated observation.",
-    "Exemplos: indivíduo inteiro, construção/vestígio, folha, flor, microhabitat, canto reprodutivo, observação narrada." to "Examples: whole individual, construction/trace, leaf, flower, microhabitat, reproductive call, narrated observation.",
-    "Descrição da mídia" to "Media description",
-    "Foto" to "Photo",
-    "Anexar foto" to "Attach photo",
-    "Anexar áudio" to "Attach audio",
-    "Sem mídias." to "No media.",
-    "Fotos e áudios ficam em arquivos locais; o banco guarda só metadados." to "Photos and audio stay as local files; the database stores only metadata.",
-    "Fotos e áudios ficam em arquivos locais; o banco guarda apenas metadados." to "Photos and audio stay as local files; the database stores only metadata.",
-    "Toque para descrever esta mídia." to "Tap to describe this media.",
-    "Mídia geral da expedição" to "General expedition media",
-    "Mídia vinculada a uma ocorrência" to "Media linked to an occurrence",
-    "Áudio" to "Audio",
-    "data de captura desconhecida" to "capture date unknown",
-    "Editar mídia" to "Edit media",
-    "Remover mídia" to "Remove media",
-    "Remover esta mídia?" to "Remove this media?",
-    "Ela ainda não foi salva no registro e será apagada de vez." to "It has not been saved to the record yet and will be deleted permanently.",
-    "Ela fica na Lixeira por 30 dias e pode ser restaurada." to "It stays in the Trash for 30 days and can be restored.",
-    "Exportar projeto" to "Export project",
-    "Exportar dados" to "Export data",
-    "Escopo: Projeto inteiro / planilha mãe consolidada" to "Scope: whole project / consolidated master sheet",
-    "Escopo: Expedição atual" to "Scope: current expedition",
-    "Para não perder o vínculo entre fotos, áudios e registros, recomendamos exportar como ZIP completo." to "To keep links between photos, audio and records, we recommend exporting as a complete ZIP.",
-    "ZIP organizado" to "Organized ZIP",
-    "O ZIP cria 01_planilha_principal, 02_tabelas_de_apoio, 03_sig_qgis, 04_darwin_core_archive e 05_midias. A planilha principal reúne as ocorrências do escopo escolhido com os campos Darwin Core e os campos configurados no projeto." to "The ZIP creates 01_planilha_principal, 02_tabelas_de_apoio, 03_sig_qgis, 04_darwin_core_archive and 05_midias. The main spreadsheet gathers occurrences from the selected scope with Darwin Core fields and the fields configured in the project.",
-    "Trilhas GPS" to "GPS tracks",
-    "O ZIP completo inclui trilha_gps_pontos.csv e o GeoJSON inclui a trilha da expedição como LineString. No QGIS, estilize featureType=expeditionTrack em laranja para ver o percurso." to "The complete ZIP includes trilha_gps_pontos.csv and the GeoJSON includes the expedition track as a LineString. In QGIS, style featureType=expeditionTrack in orange to see the route.",
-    "Conteúdo" to "Content",
-    "Somente mídias" to "Media only",
-    "Apenas planilhas" to "Spreadsheets only",
-    "Planilhas + fotos" to "Spreadsheets + photos",
-    "Planilhas + áudios" to "Spreadsheets + audio",
-    "Planilhas + fotos + áudios" to "Spreadsheets + photos + audio",
-    "Formatos" to "Formats",
-    "ZIP completo recomendado" to "Complete ZIP recommended",
-    "Versão" to "Version",
-    "Uso de rede e privacidade" to "Network use and privacy",
-    "Como citar" to "How to cite",
-    "Se o Oikos ajudou no seu trabalho, cite o aplicativo. As exportações em ZIP trazem estas citações no arquivo COMO_CITAR.txt." to "If Oikos helped your work, please cite the app. ZIP exports include these citations in the COMO_CITAR.txt file.",
-    "Copiar" to "Copy",
-    "Copiado" to "Copied",
-    "Licenças de código aberto" to "Open-source licenses",
-    "O Oikos usa estas bibliotecas de código aberto:" to "Oikos uses these open-source libraries:",
-    "Licença Apache 2.0" to "Apache License 2.0",
-    "Ler a licença Apache 2.0" to "Read the Apache 2.0 license",
-    "Avisos de terceiros do Google Play services" to "Google Play services third-party notices",
-    "Não foi possível abrir o texto." to "Could not open the text.",
-    "Seus dados ficam só neste aparelho e não vão para servidor nenhum. A internet serve apenas para o mapa, para baixar listas de espécies e, se ligado, para o endereço pelo Google." to "Your data stays on this device and goes to no server. The internet is used only for the map, downloading species lists and, if turned on, the Google address.",
-    "Darwin Core Archive (GBIF/SiBBr)" to "Darwin Core Archive (GBIF/SiBBr)",
-    "Calculando o espaço usado..." to "Calculating storage use...",
-    "Outro" to "Other",
-    "Valor livre" to "Free value",
-    "Exportar e compartilhar/salvar" to "Export and share/save",
-    "Depois de tocar no botão, escolha WhatsApp, Google Drive, Files/Arquivos ou outro app na tela de compartilhamento do Android." to "After tapping the button, choose WhatsApp, Google Drive, Files or another app in the Android share sheet.",
-    "Compartilhar, salvar ou enviar exportação" to "Share, save or send export",
-    "Escuro" to "Dark",
-    "Claro" to "Light",
-    "Alto contraste para uso ao sol." to "High contrast for use in sunlight.",
-    "Tema de alto contraste para campo, com alternancia sempre visivel." to "High-contrast field theme with an always-visible toggle.",
-    "Modo simples / coleta rápida" to "Simple mode / quick collection",
-    "Modo simples / coleta rapida" to "Simple mode / quick collection",
-    "Mostra menos campos no formulário." to "Shows fewer fields in the form.",
-    "Cache do mapa" to "Map cache",
-    "Apagar cache do mapa" to "Clear map cache",
-    "Apagar cache do mapa?" to "Clear map cache?",
-    "Isso remove apenas os mapas salvos em cache. Projetos, expedições, trilhas, ocorrências, fotos, áudios e exportações não serão removidos." to "This removes only cached maps. Projects, expeditions, tracks, occurrences, photos, audio and exports will not be removed.",
-    "Arquivos de projetos" to "Project files",
-    "Banco local" to "Local database",
-    "Cache/exportações temporárias" to "Cache/temporary exports",
-    "Cache/exportacoes temporarias" to "Cache/temporary exports",
-    "Limpar cache" to "Clear cache",
-    "Limpar cache?" to "Clear cache?",
-    "Isso apaga exportações temporárias e arquivos de apoio. Projetos, expedições, ocorrências, fotos e áudios não serão removidos." to "This deletes temporary exports and support files. Projects, expeditions, occurrences, photos and audio will not be removed.",
-    "Cancelar" to "Cancel",
-    "Sobre o aplicativo" to "About the app",
-    "Produto desenvolvido para facilitar a rotina do pesquisador em campo, reunindo catalogação de ocorrências, fotos, áudios, coordenadas e trilhas GPS em um só lugar." to "A product designed to make field research easier by bringing occurrence cataloging, photos, audio, coordinates and GPS tracks together in one place.",
-    "Enquanto você coleta, o Oikos organiza os dados em Darwin Core e prepara exportações em CSV, XLSX, JSON, GeoJSON e ZIP para uso em Excel, QGIS, R, Python e acervos científicos. De pesquisador para pesquisador." to "While you collect, Oikos organizes data in Darwin Core and prepares CSV, XLSX, JSON, GeoJSON and ZIP exports for Excel, QGIS, R, Python and scientific collections. From researcher to researcher.",
-    "Créditos" to "Credits",
-    "Aplicativo vinculado à pesquisa:" to "App linked to the research:",
-    "Mapa: © OpenStreetMap contributors (openstreetmap.org/copyright). Municípios: IBGE, Malha Municipal 2022, CC BY 4.0, adaptada para uso offline. Altitude: geoide EGM2008 (NGA). Listas de espécies: Flora e Funga do Brasil (JBRJ) e Catálogo Taxonômico da Fauna do Brasil, CC BY 4.0, obtidas no IPT do JBRJ ou na cópia do ChecklistBank." to "Map: © OpenStreetMap contributors (openstreetmap.org/copyright). Municipalities: IBGE, Malha Municipal 2022, CC BY 4.0, adapted for offline use. Altitude: EGM2008 geoid (NGA). Species lists: Flora e Funga do Brasil (JBRJ) and Catálogo Taxonômico da Fauna do Brasil, CC BY 4.0, from the JBRJ IPT or the ChecklistBank copy.",
-    "Ajuda" to "Help",
-    "Entendi" to "Got it",
-    "Coordenadas" to "Coordinates",
-    "Preencha Zona, Hemisfério, Leste (Easting) e Norte (Northing). O app converte e salva internamente como latitude/longitude em Graus Decimais para Darwin Core e GeoJSON." to "Fill Zone, Hemisphere, Easting and Northing. The app converts and stores latitude/longitude internally as Decimal Degrees for Darwin Core and GeoJSON.",
-    "Coordenada UTM inválida." to "Invalid UTM coordinate.",
-    "Zona UTM" to "UTM zone",
-    "Hemisfério" to "Hemisphere",
-    "Sul" to "South",
-    "Norte" to "North",
-    "Leste (Easting)" to "Easting",
-    "Norte (Northing)" to "Northing",
-    "Latitude DD" to "Latitude DD",
-    "Longitude DD" to "Longitude DD",
-    "Capturar localização atual" to "Capture current location",
-    "Seções avançadas" to "Advanced sections",
-    "Modo avançado opcional" to "Optional advanced mode",
-    "Preencha apenas o que fizer sentido. Campos morfológicos, ambientais e medidas podem sair como MeasurementOrFact nas exportações futuras." to "Fill only what makes sense. Morphological, environmental and measurement fields can be exported as MeasurementOrFact in future exports.",
-    "Use esta área para dados do animal observado, ouvido, capturado ou vestígio." to "Use this area for observed, heard, captured animal data or traces.",
-    "Use esta área para detalhes botânicos, como folha, caule, flor e fruto." to "Use this area for botanical details such as leaf, stem, flower and fruit.",
-    "Use esta área para pegadas, fezes, tocas, ninhos, penas, pelos, carcaças e rastros." to "Use this area for footprints, feces, burrows, nests, feathers, hair, carcasses and tracks.",
-    "Use esta área para substrato, corpo de frutificação, associações, microhabitat e observações micológicas." to "Use this area for substrate, fruiting body, associations, microhabitat and mycological notes.",
-    "Registre condições ambientais, ecologia, comportamento e observações para laboratório ou coleção." to "Record environmental conditions, ecology, behavior and lab or collection notes.",
-    "Ambiente e anotações" to "Environment and notes",
-    "Nenhum campo deste grupo está ativo. Ative campos em Configurar campos do projeto." to "No fields from this group are active. Enable fields in project field settings.",
-    "DAP em centímetros. Ao preencher, o app calcula CAP = DAP x pi." to "DBH in centimeters. When filled, the app calculates CBH = DBH x pi.",
-    "CAP em centímetros. Ao preencher, o app calcula DAP = CAP / pi." to "CBH in centimeters. When filled, the app calculates DBH = CBH / pi.",
-    "Básicos" to "Basics",
-    "Localização" to "Location",
-    "Ocorrência" to "Occurrence",
-    "Identificação" to "Identification",
-    "Anotações" to "Notes",
-    "Vestígio" to "Trace",
-    "Animal observado" to "Animal observed",
-    "Animal capturado" to "Animal captured",
-    "Animal ouvido" to "Animal heard",
-    "Vestígio animal" to "Animal trace",
-    "Armadilha fotográfica" to "Camera trap",
-    "Registro sonoro" to "Sound record",
-    "Planta" to "Plant",
-    "Parte de planta" to "Plant part",
-    "Amostra botânica" to "Botanical sample",
-    "Registro fotográfico botânico" to "Botanical photo record",
-    "Vegetação/parcela" to "Vegetation/plot",
-    "Corpo de frutificação" to "Fruiting body",
-    "Micélio" to "Mycelium",
-    "Amostra fúngica" to "Fungal sample",
-    "Registro fotográfico de funga" to "Funga photo record",
-    "Descartar alterações?" to "Discard changes?",
-    "O que foi preenchido nesta tela ainda não foi salvo." to "What you filled in on this screen has not been saved yet.",
-    "Descartar" to "Discard",
-    "Continuar editando" to "Keep editing",
-    "Publicação dos dados" to "Data publication",
-    "Licença dos dados" to "Data license",
-    "Definir depois" to "Decide later",
-    "O GBIF e o SiBBr só publicam com CC0, CC BY ou CC BY-NC. CC BY 4.0 permite qualquer uso, desde que citem a fonte." to "GBIF and SiBBr only publish under CC0, CC BY or CC BY-NC. CC BY 4.0 allows any use as long as the source is credited.",
-    "URL pública das mídias (opcional)" to "Public media URL (optional)",
-    "Endereço onde as fotos e áudios exportados ficarão publicados (Zenodo, site do laboratório). Sem ele, o Darwin Core Archive sai sem a extensão de mídia, porque o padrão exige link público." to "Address where exported photos and audio will be published (Zenodo, lab website). Without it the Darwin Core Archive omits the media extension, because the standard requires a public link.",
-    "Planilha CSV" to "CSV spreadsheet",
-    "Excel Brasil (; e vírgula)" to "Excel Brazil (; and comma)",
-    "Internacional (, e ponto)" to "International (, and dot)",
-    "Nome de quem responde pelos dados. Vai como autor e contato no eml.xml do Darwin Core Archive." to "Person responsible for the data. Used as creator and contact in the Darwin Core Archive eml.xml.",
-    "Dê um nome ao projeto antes de salvar." to "Name the project before saving.",
-    "Ativo" to "Active",
-    "Obrigatório" to "Required",
-    "Ocultar amostragem quantitativa" to "Hide quantitative sampling",
-    "Amostragem quantitativa (parcela, transecto)" to "Quantitative sampling (plot, transect)",
-    "Unidade amostral" to "Sampling unit",
-    "Para inventário quantitativo: indique a expedição de que esta faz parte (campanha > dia > parcela) e o tamanho da unidade amostral. Sem isso não se calcula densidade nem abundância relativa a partir da exportação." to "For quantitative inventories: set the parent expedition (campaign > day > plot) and the size of the sampling unit. Without it, density and relative abundance cannot be computed from the export.",
-    "Faz parte de (parentEventID)" to "Part of (parentEventID)",
-    "Nenhuma" to "None",
-    "Tamanho da unidade amostral (sampleSizeValue)" to "Sampling unit size (sampleSizeValue)",
-    "Unidade (sampleSizeUnit)" to "Unit (sampleSizeUnit)",
-    "Data como anotada (verbatimEventDate)" to "Date as written (verbatimEventDate)",
-    "Exatamente como está na caderneta ou etiqueta, por exemplo \"3-5.iii.2026\"." to "Exactly as written in the notebook or label, for example \"3-5.iii.2026\".",
-    "Gravar" to "Record",
-    "Parar e salvar" to "Stop and save",
-    "Gravando" to "Recording",
-    "A tela fica acesa durante a gravação. Sair da tela ou do app encerra e salva o áudio." to "The screen stays on while recording. Leaving the screen or the app stops and saves the audio.",
-    "Há uma gravação em andamento em outra tela." to "A recording is in progress on another screen.",
-    "Estas mídias entram no registro ao salvar." to "These media are added to the record when you save.",
-    "Exportando..." to "Exporting...",
-    "Montando o pacote. Com muitos áudios pode levar alguns minutos; não feche o app." to "Building the package. With many audio files this may take a few minutes; do not close the app.",
-    "Mapa e uso offline" to "Map and offline use",
-    "O OpenStreetMap precisa de internet. Para campo sem sinal, importe um mapa offline (.mbtiles)." to "OpenStreetMap needs internet. For fieldwork without signal, import an offline map (.mbtiles).",
-    "Sugerir município e estado pelo GPS" to "Suggest municipality and state from GPS",
-    "Usa a internet: a coordenada capturada é enviada ao serviço de endereços do Google. Desligado, nada sai do aparelho. Deixe desligado em locais de espécies sensíveis." to "Uses the internet: the captured coordinate is sent to Google's address service. When off, nothing leaves the device. Keep it off at sites of sensitive species.",
-    "Incerteza (m)" to "Uncertainty (m)",
-    "Altitude (m)" to "Elevation (m)",
-    "Incerteza da coordenada" to "Coordinate uncertainty",
-    "Raio, em metros, dentro do qual o ponto verdadeiro deve estar. O GPS do celular informa uma estimativa; corrija se usou outro receptor. As exportações guardam a coordenada em graus decimais." to "Radius, in meters, within which the true point should lie. The phone GPS gives an estimate; correct it if you used another receiver. Exports store the coordinate in decimal degrees.",
-    "Não consegui ler a coordenada. Indique o hemisfério (N/S e L/O, ou E/W) e preencha as duas. Exemplos: 22°25'51.6\"S ou 22 25 51.6 S." to "Could not read the coordinate. Give the hemisphere (N/S and E/W) and fill in both. Examples: 22°25'51.6\"S or 22 25 51.6 S.",
-    "Graus, minutos e segundos" to "Degrees, minutes and seconds",
-    "Graus e minutos decimais" to "Degrees and decimal minutes",
-    "Digite como está no GPS de mão ou na caderneta, com N/S e L/O (ou E/W). Exemplos: 22°25'51.6\"S, 22 25 51.6 S, 44 58.74 O. O app guarda em graus decimais e exporta também como foi lido (verbatimCoordinates)." to "Type it as shown on the handheld GPS or notebook, with N/S and E/W. Examples: 22°25'51.6\"S, 22 25 51.6 S, 44 58.74 W. The app stores decimal degrees and also exports it as read (verbatimCoordinates).",
-    "Use o nome científico, se souber. Exemplo: Boana faber. O teclado não corrige este campo." to "Use the scientific name if you know it. Example: Boana faber. The keyboard does not autocorrect this field.",
-    "Ocultar campos avançados" to "Hide advanced fields",
-    "Mostrar campos avançados" to "Show advanced fields",
-    "Backup e restauração" to "Backup and restore",
-    "Arquivo .zip com todos os projetos, fotos e áudios. Guarde fora do celular." to "A .zip with all projects, photos and audio. Keep it off the phone.",
-    "Último backup" to "Last backup",
-    "Nenhum backup feito neste aparelho." to "No backup made on this device.",
-    "Criar backup" to "Create backup",
-    "Restaurar" to "Restore",
-    "Criando backup..." to "Creating backup...",
-    "Preparando a restauração..." to "Preparing restore...",
-    "Restaurar este backup?" to "Restore this backup?",
-    "Feito em" to "Made on",
-    "versão" to "version",
-    "projeto(s)" to "project(s)",
-    "ocorrência(s)" to "occurrence(s)",
-    "mídia(s)" to "media file(s)",
-    "Todos os dados atuais deste aparelho serão substituídos pelos do backup. O app vai fechar e abrir de novo para concluir." to "All current data on this device will be replaced by the backup. The app will close and reopen to finish.",
-    "Substituir e restaurar" to "Replace and restore",
-    "Seus dados existem só neste aparelho" to "Your data exists only on this device",
-    "Nenhum backup feito ainda." to "No backup made yet.",
-    "Nenhum backup ainda" to "No backup yet",
-    "Último backup há" to "Last backup",
-    "dias" to "days ago",
-    "Fazer backup" to "Back up now",
-    "Procurando satélites..." to "Searching for satellites...",
-    "Boa (até 10 m)" to "Good (up to 10 m)",
-    "Razoável (até 30 m)" to "Fair (up to 30 m)",
-    "Fraca (mais de 30 m)" to "Poor (over 30 m)",
-    "Capturando posição" to "Capturing position",
-    "Leituras" to "Readings",
-    "Precisão agora" to "Accuracy now",
-    "Média" to "Average",
-    "Incerteza a registrar" to "Uncertainty to record",
-    "leituras usadas" to "readings used",
-    "Fique parado no ponto. Céu aberto e alguns segundos de leitura melhoram a média. A incerteza segue o guia do GBIF: no mínimo o dobro da precisão informada pelo GPS." to "Stay still at the point. Open sky and a few seconds of readings improve the average. Uncertainty follows the GBIF guide: at least twice the accuracy reported by the GPS.",
-    "Usar média" to "Use average",
-    "Ocultar condições da gravação" to "Hide recording conditions",
-    "Condições da gravação (microfone, temperatura, umidade)" to "Recording conditions (microphone, temperature, humidity)",
-    "Microfone ou gravador" to "Microphone or recorder",
-    "Lembrado para as próximas gravações. Exemplo: microfone do celular, Sennheiser ME66, Zoom H5." to "Remembered for the next recordings. Example: phone microphone, Sennheiser ME66, Zoom H5.",
-    "Temperatura do ar (°C)" to "Air temperature (°C)",
-    "Umidade (%)" to "Humidity (%)",
-    "Distância até o animal (m)" to "Distance to the animal (m)",
-    "Taxa de amostragem, bits, duração, fonte de áudio e modelo do aparelho são registrados automaticamente." to "Sample rate, bit depth, duration, audio source and device model are recorded automatically.",
-    "Outro" to "Other",
-    "As listas de espécies já instaladas neste aparelho são mantidas." to "Species lists already installed on this device are kept.",
-    "Listas de espécies" to "Species lists",
-    "Nenhuma instalada. Baixe uma para completar nomes científicos em campo." to "None installed. Download one to complete scientific names in the field.",
-    "Gerenciar" to "Manage",
-    "Baixe uma vez com internet e use em campo sem rede: o nome é sugerido enquanto você digita e sinônimos viram o nome aceito." to "Download once with internet and use offline in the field: names are suggested as you type and synonyms become the accepted name.",
-    "Remover lista?" to "Remove list?",
-    "Os registros já feitos não mudam. O autocompletar deixa de usar esta lista até você baixá-la de novo." to "Existing records do not change. Autocomplete stops using this list until you download it again.",
-    "Remover lista" to "Remove list",
-    "Remover" to "Remove",
-    "Outra lista (arquivo)" to "Other list (file)",
-    "Qualquer lista publicada como Darwin Core Archive com núcleo Taxon, como as de outros países no GBIF, no ChecklistBank ou em um IPT. Baixe o arquivo .zip e importe aqui." to "Any list published as a Darwin Core Archive with a Taxon core, such as other countries' lists on GBIF, ChecklistBank or an IPT. Download the .zip file and import it here.",
-    "Importar arquivo" to "Import file",
-    "Brasil · plantas, algas e fungos" to "Brazil · plants, algae and fungi",
-    "Lista oficial do JBRJ." to "Official list from JBRJ.",
-    "Baixada da cópia guardada no ChecklistBank, porque o IPT do JBRJ recusou a conexão. A cópia pode estar algumas semanas atrás do IPT." to "Downloaded from the copy kept by ChecklistBank, because the JBRJ IPT refused the connection. The copy may be a few weeks behind the IPT.",
-    "Brasil · animais" to "Brazil · animals",
-    "Catálogo oficial da fauna brasileira." to "Official catalogue of Brazilian fauna.",
-    "Não instalada" to "Not installed",
-    "cerca de" to "about",
-    "para baixar" to "to download",
-    "ocupa" to "takes",
-    "no aparelho" to "on the device",
-    "Versão nova disponível" to "New version available",
-    "Citação" to "Citation",
-    "Baixar" to "Download",
-    "Atualizar" to "Update",
-    "Baixar de novo" to "Download again",
-    "Instalada" to "Installed",
-    "publicada em" to "published on",
-    "nomes" to "names",
-    "Conectando..." to "Connecting...",
-    "Lendo o arquivo..." to "Reading the file...",
-    "Importando nomes" to "Importing names",
-    "Baixando" to "Downloading",
-    "Digite o início do gênero e do epíteto (\"boa fab\") ou o nome popular. O teclado não corrige este campo." to "Type the start of the genus and epithet (\"boa fab\") or the common name. The keyboard does not autocorrect this field.",
-    "Sinônimo de" to "Synonym of",
-    "Nome não encontrado nas listas instaladas: confira a grafia. O registro pode ser salvo assim mesmo." to "Name not found in the installed lists: check the spelling. The record can still be saved.",
-    "Nome confere com a lista instalada." to "Name matches the installed list.",
-    "Na lista instalada, este nome é sinônimo de" to "In the installed list, this name is a synonym of",
-    "Confira a identificação." to "Check the identification.",
-    "Salvar e criar o próximo" to "Save and start the next one",
-    "Repetir campos do registro anterior" to "Repeat fields from the previous record",
-    "Repetindo do registro anterior" to "Repeating from the previous record",
-    "Escolha uma vez o que não muda entre registros: coletor, ponto, habitat..." to "Choose once what stays the same between records: collector, point, habitat...",
-    "Escolher" to "Choose",
-    "Alterar" to "Change",
-    "Repetir do registro anterior" to "Repeat from the previous record",
-    "Os campos marcados são copiados agora e em cada novo registro deste projeto. Data, hora e identificador nunca são repetidos." to "Checked fields are copied now and into every new record in this project. Date, time and identifier are never repeated.",
-    "Repetir" to "Repeat",
-    "Grupo e tipo do registro" to "Record group and type",
-    "Natureza do registro" to "Basis of record",
-    "Coordenadas (mesmo ponto)" to "Coordinates (same point)",
-    "Observações" to "Remarks",
-    "Notas de campo" to "Field notes",
-    "Contagem rápida" to "Quick count",
-    "Contagem rápida (ponto, transecto)" to "Quick count (point, transect)",
-    "registro nesta expedição" to "record in this expedition",
-    "Conte ao menos um indivíduo" to "Count at least one individual",
-    "registro" to "record",
-    "registros" to "records",
-    "indivíduo" to "individual",
-    "indivíduos" to "individuals",
-    "Toque em + a cada indivíduo visto ou ouvido. Ao salvar, cada espécie vira um registro com o número de indivíduos, o horário da contagem e o ponto." to "Tap + for each individual seen or heard. When saved, each species becomes a record with the number of individuals, the count time and the point.",
-    "Início" to "Start",
-    "espécie" to "species",
-    "espécies" to "species",
-    "Ponto da contagem" to "Count point",
-    "Sem coordenada: os registros serão salvos sem ponto." to "No coordinate: records will be saved without a point.",
-    "Adicionar espécie" to "Add species",
-    "Adicionar como digitado" to "Add as typed",
-    "Nenhuma espécie ainda." to "No species yet.",
-    "Digite o nome acima. Espécies sem nome definido podem entrar como \"Turdus sp.\" ou \"morfoespécie 1\"." to "Type the name above. Species without a definite name can go in as \"Turdus sp.\" or \"morphospecies 1\".",
-    "Menos um indivíduo" to "One individual less",
-    "Tirar da contagem" to "Remove from count",
-    "Mais um indivíduo" to "One more individual",
-    "malha do IBGE 2022" to "IBGE 2022 municipal mesh",
-    "Usar" to "Use",
-    "Importar de outro celular" to "Import from another phone",
-    "Importar de um arquivo" to "Import from a file",
-    "Direto do celular ao lado, sem internet (Bluetooth e Wi-Fi)." to "Directly from the phone next to you, no internet (Bluetooth and Wi-Fi).",
-    "Enviar para outro celular" to "Send to another phone",
-    "Para o celular ao lado" to "To the phone next to you",
-    "Direto, sem internet (Bluetooth e Wi-Fi)." to "Direct, no internet (Bluetooth and Wi-Fi).",
-    "Pacote que chegou por WhatsApp, e-mail, Drive ou cabo." to "A package that arrived by WhatsApp, email, Drive or cable.",
-    "Como arquivo" to "As a file",
-    "Para mandar por WhatsApp, e-mail, Drive ou cabo." to "To send by WhatsApp, email, Drive or cable.",
-    "Enviado por" to "Sent by",
-    "Continuar" to "Continue",
-    "Diferentes nos dois celulares" to "Different on the two phones",
-    "Estes registros estão diferentes neste celular e no pacote que chegou. Escolha qual versão fica em cada um; já vem marcada a editada por último." to "These records differ between this phone and the package that arrived. Choose which version to keep in each one; the one edited last is already selected.",
-    "Todos deste celular" to "All from this phone",
-    "Todos os recebidos" to "All received",
-    "sem nome" to "unnamed",
-    "Este celular" to "This phone",
-    "Recebido" to "Received",
-    "campo diferente" to "different field",
-    "campos diferentes" to "different fields",
-    "Manter a deste celular" to "Keep this phone's version",
-    "editada em" to "edited on",
-    "Usar a que chegou" to "Use the received version",
-    "(vazio)" to "(empty)",
-    "de" to "of",
-    "Não feche esta tela até terminar." to "Do not close this screen until it finishes.",
-    "Código" to "Code",
-    "No outro celular, toque em Importar na tela inicial e escolha Importar de outro celular. Não precisa de internet." to "On the other phone, tap Import on the home screen and choose Import from another phone. No internet needed.",
-    "Procurando celulares..." to "Looking for phones...",
-    "Conectando a" to "Connecting to",
-    "Confira se o mesmo código aparece no outro celular e peça para tocar em Aceitar." to "Check that the same code appears on the other phone and ask them to tap Accept.",
-    "Enviando para" to "Sending to",
-    "Conferindo se o pacote chegou inteiro..." to "Checking that the package arrived complete...",
-    "Pacote enviado para" to "Package sent to",
-    "No outro celular, escolha se ele entra num projeto que já existe ou num projeto novo." to "On the other phone, choose whether it goes into an existing project or a new one.",
-    "Não foi possível enviar" to "Could not send",
-    "Concluir" to "Done",
-    "Tentar de novo" to "Try again",
-    "No outro celular, abra o projeto, toque em Exportar, depois em Enviar para outro celular e escolha Para o celular ao lado. Não precisa de internet." to "On the other phone, open the project, tap Export, then Send to another phone and choose To the phone next to you. No internet needed.",
-    "Este celular aparece como" to "This phone appears as",
-    "Aguardando..." to "Waiting...",
-    "quer enviar um pacote." to "wants to send a package.",
-    "Confira se o mesmo código aparece no outro celular antes de aceitar." to "Check that the same code appears on the other phone before accepting.",
-    "Recebendo de" to "Receiving from",
-    "Não foi possível receber" to "Could not receive",
-    "Aceitar" to "Accept",
-    "Recusar" to "Decline",
-    "Importar pacote" to "Import package",
-    "Registros que já estão neste aparelho (mesmo identificador) não são duplicados." to "Records already on this device (same identifier) are not duplicated.",
-    "Criar projeto novo" to "Create a new project",
-    "Juntar a" to "Merge into",
-    "as expedições entram neste projeto" to "expeditions go into this project",
-    "Importar" to "Import",
-    "Ouvir e ver o espectrograma" to "Listen and view the spectrogram",
-    "Não foi possível ler este áudio." to "Could not read this audio.",
-    "Calculando o espectrograma..." to "Computing the spectrogram...",
-    "Espectrograma" to "Spectrogram",
-    "Até" to "Up to",
-    "Pausar" to "Pause",
-    "Ouvir" to "Listen",
-    "Trilha GPS e bateria" to "GPS track and battery",
-    "Precisa: ponto a cada 3 s ou 1,5 m. Gasta mais bateria." to "Precise: a point every 3 s or 1.5 m. Uses more battery.",
-    "Equilibrada: a cada 10 s ou 5 m." to "Balanced: every 10 s or 5 m.",
-    "Economia: a cada 30 s ou 15 m. Poupa bateria." to "Saver: every 30 s or 15 m. Saves battery.",
-    "Vale para a próxima trilha. Se ela parar com a tela apagada, tire o Oikos da otimização de bateria." to "Applies to the next track. If it stops with the screen off, exclude Oikos from battery optimization.",
-    "Abrir otimização de bateria" to "Open battery optimization",
-    "Protocolo (modelos)" to "Protocol (templates)",
-    "Exemplo para este protocolo" to "Example for this protocol",
-    "Busca ativa" to "Active search",
-    "Ponto de escuta" to "Point count",
-    "Transecto" to "Transect",
-    "Parcela" to "Plot",
-    "Pitfall" to "Pitfall",
-    "Gravador automático" to "Autonomous recorder",
-    "Coleta botânica" to "Botanical collection",
-    "Etiquetas de herbário/coleção (PDF)" to "Herbarium/collection labels (PDF)",
-    "Não" to "No",
-    "ocorrência" to "occurrence",
-    "ocorrências" to "occurrences",
-    "mídia" to "media file",
-    "mídias" to "media files",
-    "dia" to "day",
-    "Abrir" to "Open",
-    "item" to "item",
-    "itens" to "items",
-    "Lixeira" to "Trash",
-    "Vazia. O que for apagado fica aqui por 30 dias." to "Empty. Anything deleted stays here for 30 days.",
-    "restauráveis por 30 dias" to "restorable for 30 days",
-    "Esvaziar lixeira?" to "Empty trash?",
-    "Tudo o que está na lixeira será apagado de vez, com fotos e áudios. Não dá para desfazer." to "Everything in the trash will be permanently deleted, including photos and audio. This cannot be undone.",
-    "Esvaziar lixeira" to "Empty trash",
-    "Esvaziar" to "Empty",
-    "Apagar de vez?" to "Delete permanently?",
-    "Apagar de vez" to "Delete permanently",
-    "Projetos, expedições, ocorrências e mídias apagados ficam aqui por 30 dias e voltam com fotos, áudios e trilhas. Depois disso são eliminados." to "Deleted projects, expeditions, occurrences and media stay here for 30 days and come back with photos, audio and tracks. After that they are removed.",
-    "Lixeira vazia." to "Trash is empty.",
-    "Nada foi apagado nos últimos 30 dias." to "Nothing was deleted in the last 30 days.",
-    "Mídia" to "Media",
-    "Apagado em" to "Deleted on",
-    "sai em" to "removed in",
-    "O projeto, com expedições, ocorrências, trilhas e mídias, vai para a lixeira e pode ser restaurado por 30 dias em Configurações > Lixeira." to "The project, with its expeditions, occurrences, tracks and media, goes to the trash and can be restored for 30 days in Settings > Trash.",
-    "A expedição, com ocorrências, trilhas e mídias, vai para a lixeira e pode ser restaurada por 30 dias em Configurações > Lixeira." to "The expedition, with its occurrences, tracks and media, goes to the trash and can be restored for 30 days in Settings > Trash.",
-    "O registro e suas fotos e áudios vão para a lixeira e podem ser restaurados por 30 dias em Configurações > Lixeira." to "The record and its photos and audio go to the trash and can be restored for 30 days in Settings > Trash.",
-    "Sugerir endereço pelo Google" to "Suggest address via Google",
-    "Só para coletas fora do Brasil. Envia a coordenada ao Google." to "Only for collections outside Brazil. Sends the coordinate to Google.",
-    "Copiando o mapa:" to "Copying the map:",
-    "Copiando o mapa..." to "Copying the map...",
-    "Remover mapa?" to "Remove map?",
-    "O arquivo do mapa sai do aparelho. Os registros não mudam." to "The map file is removed from the device. Records do not change.",
-    "Remover mapa" to "Remove map",
-    "Mapas offline" to "Offline maps",
-    "Mapa da sua área para usar sem sinal (satélite, topográfico, vegetação). Gere o .mbtiles no QGIS e importe aqui." to "Your area map for use without signal (satellite, topographic, vegetation). Make the .mbtiles in QGIS and import it here.",
-    "OpenStreetMap (internet)" to "OpenStreetMap (internet)",
-    "Precisa de internet." to "Needs internet.",
-    "zoom" to "zoom",
-    "Importar mapa (.mbtiles)" to "Import map (.mbtiles)",
-    // Telas
-    "Completo" to "Complete",
-    "Incompleto" to "Incomplete",
-    "Sem GPS" to "No GPS",
-    "Ao iniciar, o app grava o ponto de saída e atualiza a linha automaticamente a cada poucos segundos." to "When started, the app records the starting point and updates the line automatically every few seconds.",
-    "Você está aqui" to "You are here",
-    "Define se o registro é uma observação, um espécime tombado ou uma amostra. Exportado como dwc:basisOfRecord." to "Says whether the record is an observation, a preserved specimen or a sample. Exported as dwc:basisOfRecord.",
-    "Pacote com meta.xml e eml.xml, no formato que o IPT, o GBIF e o SiBBr importam sem retrabalho. Campos próprios do Oikos saem como MeasurementOrFact. As mídias entram como Simple Multimedia quando o projeto tem URL pública das mídias. Licença, autor e URL ficam em Editar projeto." to "Package with meta.xml and eml.xml, in the format that IPT, GBIF and SiBBr import without rework. Oikos's own fields go out as MeasurementOrFact. Media go in as Simple Multimedia when the project has a public media URL. License, author and URL are in Edit project.",
-    "Sai na exportação exatamente como digitado." to "Exported exactly as typed.",
-    "Produto científico desenvolvido por Luan da Silva Cortes Maciel (Maciel, L. S. C.), mestrando no Instituto de Pesquisa Jardim Botânico do Rio de Janeiro, sob orientação de Leandro Freitas e coorientação de Matheus de Toledo Moroti." to "Scientific product developed by Luan da Silva Cortes Maciel (Maciel, L. S. C.), master's student at the Rio de Janeiro Botanical Garden Research Institute, supervised by Leandro Freitas and co-supervised by Matheus de Toledo Moroti.",
-    "Taxonomia" to "Taxonomy",
-    "Amostragem" to "Sampling",
-    "Ambiente" to "Environment",
-    "Vestígios" to "Traces",
-    "Coleção" to "Collection",
-    "Ecologia" to "Ecology",
-    "Georreferenciamento" to "Georeferencing",
-    "Autoria" to "Authorship",
-    "Fungo" to "Fungus",
-    "Condições ambientais" to "Environmental conditions",
-    "Observações ecológicas" to "Ecological observations",
-    "Método de coleta" to "Collection method",
-    "Anotações rápidas" to "Quick notes",
-    "Dúvidas de identificação" to "Identification doubts",
-    "Hipótese de identificação" to "Identification hypothesis",
-    "Epíteto específico" to "Specific epithet",
-    "Datum geodésico" to "Geodetic datum",
-    // Mensagens (snackbar)
-    "Gravação encerrada e salva: o app saiu da tela." to "Recording stopped and saved: the app left the screen.",
-    "Sem permissão de localização. Ative em Configurações do Android > Apps > Oikos FieldBook > Permissões." to "No location permission. Turn it on in Android Settings > Apps > Oikos FieldBook > Permissions.",
-    "Tamanho da unidade amostral precisa ser um número." to "Sampling unit size must be a number.",
-    "A coordenada não é um número em graus decimais. Confira antes de salvar (ex.: -22.43017)." to "The coordinate is not a number in decimal degrees. Check it before saving (e.g. -22.43017).",
-    "Preencha latitude e longitude, ou deixe as duas em branco." to "Fill in both latitude and longitude, or leave both blank.",
-    "A altitude precisa ser só o número, em metros (ex.: 1520)." to "Altitude must be just the number, in meters (e.g. 1520).",
-    "A incerteza precisa ser só o número, em metros (ex.: 15)." to "Uncertainty must be just the number, in meters (e.g. 15).",
-    "Pare a gravação antes de salvar o registro." to "Stop the recording before saving the record.",
-    "Aguarde: uma foto ou um áudio ainda está sendo processado." to "Please wait: a photo or audio is still being processed.",
-    "Número de indivíduos precisa ser um número inteiro." to "Number of individuals must be a whole number.",
-    "Registro salvo. Pronto para o próximo." to "Record saved. Ready for the next one.",
-    "Gravação salva ao sair da tela." to "Recording saved when leaving the screen.",
-    "Nenhum app de câmera disponível." to "No camera app available.",
-    "Temperatura do ar: digite só o número em °C (por exemplo 22,5)." to "Air temperature: type just the number in °C (for example 22.5).",
-    "Umidade: digite um número de 0 a 100." to "Humidity: type a number from 0 to 100.",
-    "Distância: digite só o número em metros." to "Distance: type just the number in meters.",
-    "Cache já estava limpo." to "Cache was already clean.",
-    "Cache do mapa já estava vazio." to "Map cache was already empty.",
-    "Backup restaurado. Confira projetos, expedições e mídias." to "Backup restored. Check projects, expeditions and media.",
-    "Este arquivo não é um backup do Oikos FieldBook." to "This file is not an Oikos FieldBook backup.",
-    "Sem espaço no aparelho: nada foi salvo. Libere espaço e toque em Salvar de novo; o que você digitou continua na tela." to "No space left on the device: nothing was saved. Free up space and tap Save again; what you typed is still on screen.",
-    "Já existe um projeto igual." to "An identical project already exists.",
-    "Configuração de campos salva." to "Field settings saved.",
-    "Aviso: expedição salva sem data de coleta." to "Warning: expedition saved without a collection date.",
-    "eventID já existe. Use um identificador único." to "eventID already exists. Use a unique identifier.",
-    "Lixeira esvaziada." to "Trash emptied.",
-    "Aviso: registro salvo sem coordenadas." to "Warning: record saved without coordinates.",
-    "Aviso: registro salvo sem o nome da espécie." to "Warning: record saved without the species name.",
-    "occurrenceID já existe. Use um identificador único." to "occurrenceID already exists. Use a unique identifier.",
-    "Mídia atualizada." to "Media updated.",
-    "A câmera não entregou a foto. Tente de novo." to "The camera did not return the photo. Try again.",
-    "Já existe uma gravação em andamento." to "A recording is already in progress.",
-    "Aguarde: a gravação anterior ainda está sendo salva." to "Please wait: the previous recording is still being saved.",
-    "Áudio salvo." to "Audio saved.",
-    "Ponto da trilha salvo." to "Track point saved.",
-    "Ponto ignorado: precisão baixa ou deslocamento insuficiente." to "Point skipped: low accuracy or too little movement.",
-    "Permita o acesso à localização para gravar a trilha." to "Allow location access to record the track.",
-    "Trilha GPS iniciada. A linha será atualizada em tempo real." to "GPS track started. The line will update in real time.",
-    "Trilha GPS encerrada." to "GPS track stopped.",
-    "Uma trilha GPS que estava aberta foi encerrada no último ponto gravado." to "A GPS track that was left open was closed at its last recorded point.",
-    "Trilha GPS retomada após o app ter sido fechado." to "GPS track resumed after the app was closed.",
-    "Não foi possível importar: a trilha precisa ter pelo menos 2 pontos válidos." to "Could not import: the track needs at least 2 valid points.",
-    "Não foi possível iniciar a trilha em segundo plano." to "Could not start the track in the background.",
-    "Sem posição de GPS agora. Tente em local mais aberto ou digite a coordenada." to "No GPS position right now. Try a more open spot or type the coordinate.",
-    "Nenhum espécime neste escopo. As etiquetas saem para registros com natureza do registro PreservedSpecimen, MaterialSample ou LivingSpecimen." to "No specimens in this scope. Labels are made for records whose basis of record is PreservedSpecimen, MaterialSample or LivingSpecimen.",
-    "Importando o pacote..." to "Importing the package...",
-    "Latitude deve estar entre -90 e 90." to "Latitude must be between -90 and 90.",
-    "Longitude deve estar entre -180 e 180." to "Longitude must be between -180 and 180.",
-    // Listas de especies que vem no app e grupos do projeto
-    "Instalar" to "Install",
-    "vem no app, sem internet" to "comes with the app, no internet needed",
-    "Atualizar pela internet" to "Update from the internet",
-    "Cópia que vem no app. Com internet, toque em Atualizar pela internet para ter a versão mais recente." to "Copy that comes with the app. With internet, tap Update from the internet to get the latest version.",
-    "As listas oficiais do Brasil já vêm no app e funcionam sem internet: o nome é sugerido enquanto você digita, sinônimos viram o nome aceito e a distribuição por estado aparece junto. Com internet, dá para atualizar." to "Brazil's official species lists come with the app and work offline: the name is suggested as you type, synonyms become the accepted name and the distribution by state shows alongside. With internet, you can update them.",
-    "Nomes sugeridos neste projeto" to "Names suggested in this project",
-    "Escolha os grupos das listas de espécies que entram nas sugestões de nome. Sem nenhum marcado, valem todos." to "Choose the species list groups used for name suggestions. With none selected, all groups are used.",
-    "Todos os grupos" to "All groups",
-    "Flora e Funga" to "Flora and Fungi",
-    "Distribuição na lista" to "Distribution in the list"
-)
 
 @Composable
 private fun AdaptiveContent(content: @Composable () -> Unit) {
@@ -6838,11 +6247,11 @@ private fun LocationFields(
             if (coordinateFormat == "DMS") "Graus, minutos e segundos" else "Graus e minutos decimais",
             "Digite como está no GPS de mão ou na caderneta, com N/S e L/O (ou E/W). Exemplos: 22°25'51.6\"S, 22 25 51.6 S, 44 58.74 O. O app guarda em graus decimais e exporta também como foi lido (verbatimCoordinates)."
         )
-        TextInput("Latitude ($coordinateFormat)", sexLat, autoCorrect = false) {
+        TextInput(tr("Latitude ($coordinateFormat)", "Latitude ($coordinateFormat)", "Latitud ($coordinateFormat)"), sexLat, autoCorrect = false) {
             sexLat = it
             syncDecimalFromSexagesimal()
         }
-        TextInput("Longitude ($coordinateFormat)", sexLon, autoCorrect = false) {
+        TextInput(tr("Longitude ($coordinateFormat)", "Longitude ($coordinateFormat)", "Longitud ($coordinateFormat)"), sexLon, autoCorrect = false) {
             sexLon = it
             syncDecimalFromSexagesimal()
         }
@@ -6852,8 +6261,8 @@ private fun LocationFields(
     }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         val suffix = if (isUtm || isSexagesimal) " DD" else ""
-        TextInput("Latitude$suffix", lat, KeyboardType.Decimal, Modifier.weight(1f), signToggle = true, onChange = onLat)
-        TextInput("Longitude$suffix", lon, KeyboardType.Decimal, Modifier.weight(1f), signToggle = true, onChange = onLon)
+        TextInput(tr("Latitude$suffix", "Latitude$suffix", "Latitud$suffix"), lat, KeyboardType.Decimal, Modifier.weight(1f), signToggle = true, onChange = onLat)
+        TextInput(tr("Longitude$suffix", "Longitude$suffix", "Longitud$suffix"), lon, KeyboardType.Decimal, Modifier.weight(1f), signToggle = true, onChange = onLon)
     }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         TextInput("Altitude (m)", alt, KeyboardType.Decimal, Modifier.weight(1f), onChange = onAlt)
@@ -7175,11 +6584,120 @@ private fun dwcValueLabel(value: String): String = when (value) {
     else -> value
 }
 
+/** Rotulo em espanhol para um valor de vocabulario controlado; o valor gravado continua o do padrao. */
+private fun dwcValueLabelEs(value: String): String = when (value) {
+    "HumanObservation" -> "Observación humana"
+    "MachineObservation" -> "Observación con máquina"
+    "PreservedSpecimen" -> "Espécimen preservado"
+    "MaterialSample" -> "Muestra de material"
+    "LivingSpecimen" -> "Espécimen vivo"
+    "FossilSpecimen" -> "Espécimen fósil"
+    "MaterialCitation" -> "Citación de material"
+    "present" -> "Presente"
+    "absent" -> "Ausente"
+    "male" -> "Macho"
+    "female" -> "Hembra"
+    "hermaphrodite" -> "Hermafrodita"
+    "undetermined", "unknown" -> "Indeterminado"
+    "uncertain" -> "Incierto"
+    "egg" -> "Huevo"
+    "larva" -> "Larva"
+    "tadpole" -> "Renacuajo"
+    "juvenile" -> "Juvenil"
+    "subadult" -> "Subadulto"
+    "adult" -> "Adulto"
+    "seedling" -> "Plántula"
+    "sapling" -> "Brinzal"
+    "seed" -> "Semilla"
+    "kingdom" -> "Reino"
+    "phylum" -> "Filo"
+    "subphylum" -> "Subfilo"
+    "class" -> "Clase"
+    "subclass" -> "Subclase"
+    "order" -> "Orden"
+    "suborder" -> "Suborden"
+    "infraorder" -> "Infraorden"
+    "family" -> "Familia"
+    "superfamily" -> "Superfamilia"
+    "subfamily" -> "Subfamilia"
+    "tribe" -> "Tribu"
+    "subtribe" -> "Subtribu"
+    "genus" -> "Género"
+    "subgenus" -> "Subgénero"
+    "species" -> "Especie"
+    "subspecies" -> "Subespecie"
+    "variety" -> "Variedad"
+    "form" -> "Forma"
+    "holotype" -> "Holotipo"
+    "paratype" -> "Paratipo"
+    "isotype" -> "Isotipo"
+    "lectotype" -> "Lectotipo"
+    "neotype" -> "Neotipo"
+    "syntype" -> "Sintipo"
+    "topotype" -> "Topotipo"
+    "notAType" -> "No es tipo"
+    "native" -> "Nativa"
+    "nativeReintroduced" -> "Nativa (reintroducida)"
+    "introduced" -> "Introducida"
+    "introducedAssistedColonisation" -> "Introducida (colonización asistida)"
+    "vagrant" -> "Transitoria (casual)"
+    "captive" -> "En cautiverio"
+    "cultivated" -> "Cultivada"
+    "released" -> "Liberada"
+    "failing" -> "En declive"
+    "casual" -> "Ocasional"
+    "reproducing" -> "En reproducción"
+    "established" -> "Establecida"
+    "colonising" -> "Colonizadora"
+    "invasive" -> "Invasora"
+    "widespreadInvasive" -> "Invasora generalizada"
+    "corridor" -> "Corredor"
+    "escapeFromConfinement" -> "Escape de confinamiento"
+    "releaseInNature" -> "Liberación en la naturaleza"
+    "transportContaminant" -> "Contaminante de transporte"
+    "transportStowaway" -> "Polizón en transporte"
+    "unaided" -> "Dispersión propia"
+    "alive" -> "Vivo"
+    "dead" -> "Muerto"
+    "mixed" -> "Mixto"
+    "unverified" -> "No verificada"
+    "verifiedBySpecialist" -> "Verificada por especialista"
+    "requiresVerification" -> "Requiere verificación"
+    "verified" -> "Verificada"
+    "exsicata" -> "Exsicata"
+    "alcohol" -> "Alcohol"
+    "driedWhole" -> "Seco entero"
+    "pinned" -> "Montado en alfiler"
+    "tissueInSilica" -> "Tejido en sílica gel"
+    "tissueInEthanol" -> "Tejido en etanol"
+    "skeleton" -> "Esqueleto"
+    "skin" -> "Piel"
+    "slide" -> "Preparación microscópica"
+    "photographOnly" -> "Solo fotografía"
+    "inCollection" -> "Depositado"
+    "inProcessing" -> "En procesamiento"
+    "onLoan" -> "En préstamo"
+    "missing" -> "Extraviado"
+    "destroyed" -> "Destruido"
+    "notCollected" -> "No colectado"
+    "metre" -> "metro"
+    "squareMetre" -> "metro cuadrado"
+    "hectare" -> "hectárea"
+    "kilometre" -> "kilómetro"
+    "hour" -> "hora"
+    "minute" -> "minuto"
+    "day" -> "día"
+    "trapNight" -> "trampa-noche"
+    "individual" -> "individuo"
+    else -> value
+}
+
 /** Valor de vocabulario na lingua da tela; em ingles, o proprio termo em palavras ("notAType" -> "Not a type"). */
 @Composable
 private fun dwcValueText(value: String): String {
     val portuguese = dwcValueLabel(value)
-    if (LocalOikosLanguage.current == OikosLanguage.Portuguese || portuguese == value) return portuguese
+    if (LocalOikosLanguage.current == AppLanguage.ES) return dwcValueLabelEs(value)
+    if (LocalOikosLanguage.current == AppLanguage.PT || portuguese == value) return portuguese
     val words = value.replace(Regex("([a-z])([A-Z])"), "$1 $2").lowercase()
     return if (portuguese.first().isUpperCase()) words.replaceFirstChar { it.uppercase() } else words
 }
