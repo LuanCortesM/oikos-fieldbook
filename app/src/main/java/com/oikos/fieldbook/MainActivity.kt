@@ -74,6 +74,9 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.GpsFixed
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.LightMode
@@ -3220,14 +3223,37 @@ private fun ExportScreen(viewModel: AppViewModel, projectId: Long, sessionId: Lo
                 Spacer(Modifier.width(8.dp))
                 Text(ui("Etiquetas de herbário/coleção (PDF)"))
             }
+            // Um botao so para a troca entre celulares: direto para o celular ao
+            // lado (Bluetooth + Wi-Fi, sem internet) ou como arquivo.
+            var nearbySending by remember { mutableStateOf(false) }
+            var choosingSend by remember { mutableStateOf(false) }
+            val askNearbySend = rememberNearbyPermissions(viewModel) { nearbySending = true }
+            if (nearbySending) NearbySendDialog(viewModel, projectId, sessionId, onClose = { nearbySending = false })
+            if (choosingSend) {
+                PhoneTransferChooser(
+                    title = ui("Enviar para outro celular"),
+                    nearbyTitle = ui("Para o celular ao lado"),
+                    fileTitle = ui("Como arquivo"),
+                    fileDetails = ui("Para mandar por WhatsApp, e-mail, Drive ou cabo."),
+                    onNearby = {
+                        choosingSend = false
+                        askNearbySend()
+                    },
+                    onFile = {
+                        choosingSend = false
+                        viewModel.exportProjectPackage(projectId, sessionId, onShare)
+                    },
+                    onDismiss = { choosingSend = false }
+                )
+            }
             OutlinedButton(
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !exporting,
-                onClick = { viewModel.exportProjectPackage(projectId, sessionId, onShare) }
+                onClick = { choosingSend = true }
             ) {
-                Icon(Icons.Default.Share, null)
+                Icon(Icons.Default.PhoneAndroid, null)
                 Spacer(Modifier.width(8.dp))
-                Text(ui("Pacote para outro celular"))
+                Text(ui("Enviar para outro celular"))
             }
             if (exporting) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -3740,7 +3766,8 @@ private fun MediaListCard(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Text(media.fileName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // Numero fixo da midia (o mesmo nas planilhas de toda a equipe) e o arquivo.
+                Text(listOf(media.mediaCode, media.fileName).filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             IconButton(onClick = { editing = true }) {
                 Icon(Icons.Default.Edit, ui("Editar mídia"))
@@ -4838,22 +4865,147 @@ private fun ImportPackageButton(viewModel: AppViewModel, projects: List<ProjectE
     val alive = remember { java.util.concurrent.atomic.AtomicBoolean(true) }
     DisposableEffect(Unit) { onDispose { alive.set(false) } }
     val currentOnImported by rememberUpdatedState(onImported)
-    var pending by remember { mutableStateOf<Pair<Uri, TransferManifest>?>(null) }
-    var target by remember { mutableStateOf<Long?>(null) }
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) scope.launch {
+    var pending by remember { mutableStateOf<PendingImport?>(null) }
+    var receiving by remember { mutableStateOf(false) }
+    fun inspect(uri: Uri, received: File?) {
+        scope.launch {
             viewModel.inspectProjectPackage(uri)
-                .onSuccess { manifest ->
-                    // Se ja existe projeto com o mesmo nome, o mais provavel e juntar a ele.
-                    target = projects.firstOrNull { it.name == manifest.projectName }?.id
-                    pending = uri to manifest
+                .onSuccess { manifest -> pending = PendingImport(uri, manifest, received) }
+                .onFailure {
+                    received?.delete()
+                    viewModel.showMessage(com.oikos.fieldbook.util.UiLanguage.t("Não foi possível abrir o pacote: ${it.message}", "Could not open the package: ${it.message}"))
                 }
-                .onFailure { viewModel.showMessage("Não foi possível abrir o pacote: ${it.message}") }
         }
     }
-    pending?.let { (uri, manifest) ->
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) inspect(uri, null)
+    }
+    val askNearby = rememberNearbyPermissions(viewModel) { receiving = true }
+    if (receiving) {
+        NearbyReceiveDialog(
+            viewModel,
+            onReceived = { file ->
+                receiving = false
+                viewModel.nearby.stop()
+                inspect(Uri.fromFile(file), file)
+            },
+            onClose = {
+                receiving = false
+                viewModel.nearby.stop()
+            }
+        )
+    }
+    pending?.let { item ->
+        ImportPackageDialogs(
+            item = item,
+            projects = projects,
+            onCancel = {
+                item.received?.delete()
+                pending = null
+            },
+            onImport = { target, takeIncoming ->
+                pending = null
+                viewModel.importProjectPackage(item.uri, target, takeIncoming, cleanup = item.received) { id -> if (alive.get()) currentOnImported(id) }
+            }
+        )
+    }
+    // Um botao so para a troca entre celulares: direto do celular ao lado (sem
+    // internet e sem mexer em arquivos) ou o pacote que chegou como arquivo.
+    var choosing by remember { mutableStateOf(false) }
+    if (choosing) {
+        PhoneTransferChooser(
+            title = ui("Receber de outro celular"),
+            nearbyTitle = ui("Do celular ao lado"),
+            fileTitle = ui("De um arquivo"),
+            fileDetails = ui("Pacote que chegou por WhatsApp, e-mail, Drive ou cabo."),
+            onNearby = {
+                choosing = false
+                askNearby()
+            },
+            onFile = {
+                choosing = false
+                launcher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
+            },
+            onDismiss = { choosing = false }
+        )
+    }
+    OutlinedButton(onClick = { choosing = true }, modifier = Modifier.fillMaxWidth()) {
+        Icon(Icons.Default.PhoneAndroid, null)
+        Spacer(Modifier.width(8.dp))
+        Text(ui("Receber de outro celular"))
+    }
+}
+
+/** Escolha da troca entre celulares: direto para o celular ao lado ou por arquivo. */
+@Composable
+private fun PhoneTransferChooser(
+    title: String,
+    nearbyTitle: String,
+    fileTitle: String,
+    fileDetails: String,
+    onNearby: () -> Unit,
+    onFile: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                PhoneTransferOption(Icons.Default.NearMe, nearbyTitle, ui("Direto, sem internet (Bluetooth e Wi-Fi)."), onNearby)
+                PhoneTransferOption(Icons.Default.FolderOpen, fileTitle, fileDetails, onFile)
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text(ui("Cancelar")) } }
+    )
+}
+
+@Composable
+private fun PhoneTransferOption(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, details: String, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f), MaterialTheme.shapes.medium)
+            .clickable(onClick = onClick)
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(details, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** Pacote escolhido ou recebido, ja lido e comparado com este aparelho. [received] e apagado depois. */
+private data class PendingImport(val uri: Uri, val manifest: TransferManifest, val received: File?)
+
+/**
+ * Onde o pacote entra (projeto novo com o nome de quem enviou, ou juntar a um
+ * projeto deste aparelho) e, se houver registros editados nos dois celulares,
+ * qual versao fica em cada um.
+ */
+@Composable
+private fun ImportPackageDialogs(
+    item: PendingImport,
+    projects: List<ProjectEntity>,
+    onCancel: () -> Unit,
+    onImport: (Long?, Set<String>) -> Unit
+) {
+    val manifest = item.manifest
+    // O mais provavel e juntar ao projeto que ja tem as expedicoes do pacote ou,
+    // sem ele, a um projeto com o mesmo nome.
+    var target by remember(item) { mutableStateOf(manifest.existingProjectId ?: projects.firstOrNull { it.name == manifest.projectName }?.id) }
+    var choosingVersions by remember(item) { mutableStateOf(false) }
+    // Ja vem marcada a versao editada por ultimo em cada registro.
+    val takeIncoming = remember(item) { mutableStateListOf<String>().apply { addAll(manifest.conflicts.filter { it.incomingIsNewer }.map { it.key }) } }
+    if (!choosingVersions) {
         AlertDialog(
-            onDismissRequest = { pending = null },
+            onDismissRequest = onCancel,
             title = { Text(ui("Importar pacote")) },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -4862,12 +5014,13 @@ private fun ImportPackageButton(viewModel: AppViewModel, projects: List<ProjectE
                             "${manifest.occurrences} ${ui(if (manifest.occurrences == 1) "ocorrência" else "ocorrências")}, " +
                             "${manifest.media} ${ui(if (manifest.media == 1) "mídia" else "mídias")}."
                     )
+                    if (manifest.senderName.isNotBlank()) Text("${ui("Enviado por")} ${manifest.senderName}")
                     Text(
                         ui("Registros que já estão neste aparelho (mesmo identificador) não são duplicados."),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    OfflineMapChoice(selected = target == null, title = ui("Criar projeto novo"), details = manifest.projectName, onSelect = { target = null })
+                    OfflineMapChoice(selected = target == null, title = ui("Criar projeto novo"), details = manifest.newProjectName, onSelect = { target = null })
                     projects.forEach { project ->
                         OfflineMapChoice(selected = target == project.id, title = "${ui("Juntar a")} ${project.name}", details = ui("as expedições entram neste projeto"), onSelect = { target = project.id })
                     }
@@ -4875,21 +5028,270 @@ private fun ImportPackageButton(viewModel: AppViewModel, projects: List<ProjectE
             },
             confirmButton = {
                 Button(onClick = {
-                    pending = null
-                    viewModel.importProjectPackage(uri, target) { id -> if (alive.get()) currentOnImported(id) }
-                }) { Text(ui("Importar")) }
+                    if (manifest.conflicts.isEmpty()) onImport(target, emptySet()) else choosingVersions = true
+                }) { Text(if (manifest.conflicts.isEmpty()) ui("Importar") else ui("Continuar")) }
             },
-            dismissButton = { TextButton(onClick = { pending = null }) { Text(ui("Cancelar")) } }
+            dismissButton = { TextButton(onClick = onCancel) { Text(ui("Cancelar")) } }
+        )
+    } else {
+        val portuguese = LocalOikosLanguage.current == OikosLanguage.Portuguese
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text(ui("Diferentes nos dois celulares")) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(ui("Estes registros estão diferentes neste celular e no pacote que chegou. Escolha qual versão fica em cada um; já vem marcada a editada por último."))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { takeIncoming.clear() }) { Text(ui("Todos deste celular")) }
+                        TextButton(onClick = { takeIncoming.clear(); takeIncoming.addAll(manifest.conflicts.map { it.key }) }) { Text(ui("Todos os recebidos")) }
+                    }
+                    manifest.conflicts.forEach { conflict ->
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(MaterialTheme.shapes.medium)
+                                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f), MaterialTheme.shapes.medium)
+                                .padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                "${ui(if (conflict.isOccurrence) "Ocorrência" else "Expedição")} · ${conflict.title.ifBlank { ui("sem nome") }}",
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            if (conflict.subtitle.isNotBlank()) Text(conflict.subtitle, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            conflict.differences.take(MAX_DIFFERENCES_SHOWN).forEach { difference ->
+                                Text(transferFieldLabel(difference.column, portuguese), style = MaterialTheme.typography.labelLarge)
+                                Text("${ui("Este celular")}: ${transferValueText(difference.local)}", style = MaterialTheme.typography.bodySmall)
+                                Text("${ui("Recebido")}: ${transferValueText(difference.incoming)}", style = MaterialTheme.typography.bodySmall)
+                            }
+                            val hidden = conflict.differences.size - MAX_DIFFERENCES_SHOWN
+                            if (hidden > 0) Text("+ $hidden ${ui(if (hidden == 1) "campo diferente" else "campos diferentes")}", style = MaterialTheme.typography.labelMedium)
+                            OfflineMapChoice(
+                                selected = conflict.key !in takeIncoming,
+                                title = ui("Manter a deste celular"),
+                                details = "${ui("editada em")} ${transferDate(conflict.localUpdatedAt)}",
+                                onSelect = { takeIncoming.remove(conflict.key) }
+                            )
+                            OfflineMapChoice(
+                                selected = conflict.key in takeIncoming,
+                                title = ui("Usar a que chegou"),
+                                details = "${ui("editada em")} ${transferDate(conflict.incomingUpdatedAt)}",
+                                onSelect = { if (conflict.key !in takeIncoming) takeIncoming.add(conflict.key) }
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = { Button(onClick = { onImport(target, takeIncoming.toSet()) }) { Text(ui("Importar")) } },
+            dismissButton = { TextButton(onClick = { choosingVersions = false }) { Text(ui("Voltar")) } }
         )
     }
-    OutlinedButton(
-        onClick = { launcher.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Icon(Icons.Default.FileUpload, null)
-        Spacer(Modifier.width(8.dp))
-        Text(ui("Importar de outro celular"))
+}
+
+private const val MAX_DIFFERENCES_SHOWN = 8
+
+/** Nome do campo em conflito: rotulo do Darwin Core ou dos campos proprios do Oikos. */
+private fun transferFieldLabel(column: String, portuguese: Boolean): String {
+    val term = column.removePrefix("dyn:")
+    DarwinCoreCatalog.allFields.firstOrNull { it.term == term }?.let { return if (portuguese) it.labelPt else it.labelEn }
+    val (pt, en) = when (term) {
+        "name" -> "Nome da expedição" to "Expedition name"
+        "startTime" -> "Hora de início" to "Start time"
+        "endTime" -> "Hora de término" to "End time"
+        "fieldTeam" -> "Equipe" to "Field team"
+        "gpsTrackEnabled" -> "Trilha GPS" to "GPS track"
+        "notes" -> "Observações" to "Notes"
+        "fieldNotes" -> "Notas de campo" to "Field notes"
+        "formType" -> "Tipo de ficha" to "Form type"
+        "occurrenceType" -> "Tipo de registro" to "Record type"
+        "environmentType" -> "Tipo de ambiente" to "Environment type"
+        "coordinateCapturedAt" -> "Hora da coordenada" to "Coordinate time"
+        else -> term to term
     }
+    return if (portuguese) pt else en
+}
+
+@Composable
+private fun transferValueText(value: String): String = if (value.isBlank()) ui("(vazio)") else dwcValueText(value)
+
+private fun transferDate(millis: Long): String =
+    if (millis <= 0L) "?" else Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"))
+
+/**
+ * Pede as permissoes do envio direto (dispositivos proximos; localizacao ate o
+ * Android 12) e so entao segue. Sem elas o Nearby recusa anunciar ou procurar.
+ */
+@Composable
+private fun rememberNearbyPermissions(viewModel: AppViewModel, onGranted: () -> Unit): () -> Unit {
+    val context = LocalContext.current
+    val currentOnGranted by rememberUpdatedState(onGranted)
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        if (result.values.all { it }) currentOnGranted()
+        else viewModel.showMessage(
+            com.oikos.fieldbook.util.UiLanguage.t(
+                "Sem a permissão de dispositivos próximos o envio direto não funciona. Você ainda pode usar o pacote por WhatsApp, Drive ou cabo.",
+                "Without the nearby devices permission, direct transfer does not work. You can still use the package via WhatsApp, Drive or cable."
+            )
+        )
+    }
+    return {
+        val missing = com.oikos.fieldbook.services.NearbyTransfer.requiredPermissions()
+            .filter { androidx.core.content.ContextCompat.checkSelfPermission(context, it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
+        if (missing.isEmpty()) currentOnGranted() else launcher.launch(missing.toTypedArray())
+    }
+}
+
+/** Tela acesa enquanto o dialogo de envio/recebimento esta aberto. */
+@Composable
+private fun KeepScreenOn() {
+    val view = LocalView.current
+    DisposableEffect(view) {
+        view.keepScreenOn = true
+        onDispose { view.keepScreenOn = false }
+    }
+}
+
+@Composable
+private fun TransferProgress(bytes: Long, total: Long) {
+    if (total > 0) {
+        LinearProgressIndicator(progress = { (bytes.toFloat() / total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+        Text("${formatMegabytes(bytes)} ${ui("de")} ${formatMegabytes(total)}", style = MaterialTheme.typography.labelMedium)
+    } else {
+        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+    }
+    Text(ui("Não feche esta tela até terminar."), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+private fun formatMegabytes(bytes: Long): String =
+    String.format(Locale.getDefault(), "%.1f MB", bytes / (1024.0 * 1024.0))
+
+@Composable
+private fun TransferCode(code: String) {
+    if (code.isBlank()) return
+    Text("${ui("Código")}: $code", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
+}
+
+/** Quem envia: procura celulares com o "Receber" aberto e manda o pacote. */
+@Composable
+private fun NearbySendDialog(viewModel: AppViewModel, projectId: Long, sessionId: Long?, onClose: () -> Unit) {
+    val state by viewModel.nearby.state.collectAsState()
+    KeepScreenOn()
+    LaunchedEffect(Unit) { viewModel.startNearbySend(projectId, sessionId) }
+    val close = {
+        viewModel.nearby.stop()
+        onClose()
+    }
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text(ui("Enviar para celular próximo")) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                when (val current = state) {
+                    is com.oikos.fieldbook.services.NearbyTransfer.State.Searching -> {
+                        Text(ui("No outro celular, toque em Receber de outro celular na tela inicial e escolha Do celular ao lado. Não precisa de internet."))
+                        if (current.peers.isEmpty()) {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                            Text(ui("Procurando celulares..."), style = MaterialTheme.typography.labelMedium)
+                        }
+                        current.peers.forEach { peer ->
+                            OutlinedButton(onClick = { viewModel.nearby.connectTo(peer) }, modifier = Modifier.fillMaxWidth()) {
+                                Icon(Icons.Default.PhoneAndroid, null)
+                                Spacer(Modifier.width(8.dp))
+                                Text(peer.name)
+                            }
+                        }
+                    }
+                    is com.oikos.fieldbook.services.NearbyTransfer.State.Connecting -> {
+                        Text("${ui("Conectando a")} ${current.name}...")
+                        TransferCode(current.code)
+                        Text(ui("Confira se o mesmo código aparece no outro celular e peça para tocar em Aceitar."))
+                    }
+                    is com.oikos.fieldbook.services.NearbyTransfer.State.Transferring -> {
+                        Text("${ui("Enviando para")} ${current.name}")
+                        TransferProgress(current.bytes, current.total)
+                    }
+                    is com.oikos.fieldbook.services.NearbyTransfer.State.Confirming -> {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Text(ui("Conferindo se o pacote chegou inteiro..."))
+                    }
+                    is com.oikos.fieldbook.services.NearbyTransfer.State.Sent ->
+                        Text("${ui("Pacote enviado para")} ${current.name}. ${ui("No outro celular, escolha se ele entra num projeto que já existe ou num projeto novo.")}")
+                    is com.oikos.fieldbook.services.NearbyTransfer.State.Failed ->
+                        Text("${ui("Não foi possível enviar")}: ${current.message}")
+                    else -> {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Text(ui("Montando o pacote. Com muitos áudios pode levar alguns minutos; não feche o app."))
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            when (state) {
+                is com.oikos.fieldbook.services.NearbyTransfer.State.Sent -> Button(onClick = close) { Text(ui("Concluir")) }
+                is com.oikos.fieldbook.services.NearbyTransfer.State.Failed -> Button(onClick = { viewModel.startNearbySend(projectId, sessionId) }) { Text(ui("Tentar de novo")) }
+                else -> Unit
+            }
+        },
+        dismissButton = {
+            if (state !is com.oikos.fieldbook.services.NearbyTransfer.State.Sent) TextButton(onClick = close) { Text(ui("Cancelar")) }
+        }
+    )
+}
+
+/** Quem recebe: fica visivel para os celulares proximos e aceita o pacote. */
+@Composable
+private fun NearbyReceiveDialog(viewModel: AppViewModel, onReceived: (File) -> Unit, onClose: () -> Unit) {
+    val state by viewModel.nearby.state.collectAsState()
+    val currentOnReceived by rememberUpdatedState(onReceived)
+    KeepScreenOn()
+    LaunchedEffect(Unit) { viewModel.nearby.startReceiving() }
+    LaunchedEffect(state) {
+        (state as? com.oikos.fieldbook.services.NearbyTransfer.State.Received)?.let { currentOnReceived(it.file) }
+    }
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text(ui("Receber de celular próximo")) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                when (val current = state) {
+                    is com.oikos.fieldbook.services.NearbyTransfer.State.Waiting -> {
+                        Text(ui("No outro celular, abra o projeto, toque em Exportar, depois em Enviar para outro celular e escolha Para o celular ao lado. Não precisa de internet."))
+                        Text("${ui("Este celular aparece como")}: ${current.myName}", style = MaterialTheme.typography.titleSmall)
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Text(ui("Aguardando..."), style = MaterialTheme.typography.labelMedium)
+                    }
+                    is com.oikos.fieldbook.services.NearbyTransfer.State.Incoming -> {
+                        Text("${current.name} ${ui("quer enviar um pacote.")}")
+                        TransferCode(current.code)
+                        Text(ui("Confira se o mesmo código aparece no outro celular antes de aceitar."))
+                    }
+                    is com.oikos.fieldbook.services.NearbyTransfer.State.Transferring -> {
+                        Text("${ui("Recebendo de")} ${current.name}")
+                        TransferProgress(current.bytes, current.total)
+                    }
+                    is com.oikos.fieldbook.services.NearbyTransfer.State.Failed ->
+                        Text("${ui("Não foi possível receber")}: ${current.message}")
+                    else -> {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Text(ui("Conectando..."))
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            when (val current = state) {
+                is com.oikos.fieldbook.services.NearbyTransfer.State.Incoming -> Button(onClick = { viewModel.nearby.accept(current.endpointId) }) { Text(ui("Aceitar")) }
+                is com.oikos.fieldbook.services.NearbyTransfer.State.Failed -> Button(onClick = { viewModel.nearby.startReceiving() }) { Text(ui("Tentar de novo")) }
+                else -> Unit
+            }
+        },
+        dismissButton = {
+            when (val current = state) {
+                is com.oikos.fieldbook.services.NearbyTransfer.State.Incoming -> TextButton(onClick = { viewModel.nearby.reject(current.endpointId) }) { Text(ui("Recusar")) }
+                else -> TextButton(onClick = onClose) { Text(ui("Cancelar")) }
+            }
+        }
+    )
 }
 
 /** Lixeira: o que foi apagado fica 30 dias e pode voltar inteiro. */
@@ -5912,8 +6314,55 @@ private val englishText = mapOf(
     "Mais um indivíduo" to "One more individual",
     "malha do IBGE 2022" to "IBGE 2022 municipal mesh",
     "Usar" to "Use",
-    "Pacote para outro celular" to "Package for another phone",
-    "Importar de outro celular" to "Import from another phone",
+    "Receber de celular próximo" to "Receive from a nearby phone",
+    "Receber de outro celular" to "Receive from another phone",
+    "Enviar para outro celular" to "Send to another phone",
+    "Do celular ao lado" to "From the phone next to you",
+    "Para o celular ao lado" to "To the phone next to you",
+    "Direto, sem internet (Bluetooth e Wi-Fi)." to "Direct, no internet (Bluetooth and Wi-Fi).",
+    "De um arquivo" to "From a file",
+    "Pacote que chegou por WhatsApp, e-mail, Drive ou cabo." to "A package that arrived by WhatsApp, email, Drive or cable.",
+    "Como arquivo" to "As a file",
+    "Para mandar por WhatsApp, e-mail, Drive ou cabo." to "To send by WhatsApp, email, Drive or cable.",
+    "Enviado por" to "Sent by",
+    "Continuar" to "Continue",
+    "Diferentes nos dois celulares" to "Different on the two phones",
+    "Estes registros estão diferentes neste celular e no pacote que chegou. Escolha qual versão fica em cada um; já vem marcada a editada por último." to "These records differ between this phone and the package that arrived. Choose which version to keep in each one; the one edited last is already selected.",
+    "Todos deste celular" to "All from this phone",
+    "Todos os recebidos" to "All received",
+    "sem nome" to "unnamed",
+    "Este celular" to "This phone",
+    "Recebido" to "Received",
+    "campo diferente" to "different field",
+    "campos diferentes" to "different fields",
+    "Manter a deste celular" to "Keep this phone's version",
+    "editada em" to "edited on",
+    "Usar a que chegou" to "Use the received version",
+    "(vazio)" to "(empty)",
+    "de" to "of",
+    "Não feche esta tela até terminar." to "Do not close this screen until it finishes.",
+    "Código" to "Code",
+    "Enviar para celular próximo" to "Send to a nearby phone",
+    "No outro celular, toque em Receber de outro celular na tela inicial e escolha Do celular ao lado. Não precisa de internet." to "On the other phone, tap Receive from another phone on the home screen and choose From the phone next to you. No internet needed.",
+    "Procurando celulares..." to "Looking for phones...",
+    "Conectando a" to "Connecting to",
+    "Confira se o mesmo código aparece no outro celular e peça para tocar em Aceitar." to "Check that the same code appears on the other phone and ask them to tap Accept.",
+    "Enviando para" to "Sending to",
+    "Conferindo se o pacote chegou inteiro..." to "Checking that the package arrived complete...",
+    "Pacote enviado para" to "Package sent to",
+    "No outro celular, escolha se ele entra num projeto que já existe ou num projeto novo." to "On the other phone, choose whether it goes into an existing project or a new one.",
+    "Não foi possível enviar" to "Could not send",
+    "Concluir" to "Done",
+    "Tentar de novo" to "Try again",
+    "No outro celular, abra o projeto, toque em Exportar, depois em Enviar para outro celular e escolha Para o celular ao lado. Não precisa de internet." to "On the other phone, open the project, tap Export, then Send to another phone and choose To the phone next to you. No internet needed.",
+    "Este celular aparece como" to "This phone appears as",
+    "Aguardando..." to "Waiting...",
+    "quer enviar um pacote." to "wants to send a package.",
+    "Confira se o mesmo código aparece no outro celular antes de aceitar." to "Check that the same code appears on the other phone before accepting.",
+    "Recebendo de" to "Receiving from",
+    "Não foi possível receber" to "Could not receive",
+    "Aceitar" to "Accept",
+    "Recusar" to "Decline",
     "Importar pacote" to "Import package",
     "Registros que já estão neste aparelho (mesmo identificador) não são duplicados." to "Records already on this device (same identifier) are not duplicated.",
     "Criar projeto novo" to "Create a new project",

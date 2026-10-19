@@ -3,6 +3,7 @@ package com.oikos.fieldbook.services
 import com.oikos.fieldbook.util.UiLanguage
 
 import android.database.sqlite.SQLiteDatabase
+import com.oikos.fieldbook.data.MediaCodes
 import com.oikos.fieldbook.data.RowSnapshot
 import com.oikos.fieldbook.data.OikosDatabase
 import org.json.JSONArray
@@ -176,7 +177,10 @@ class TrashService(private val database: OikosDatabase, private val filesDir: Fi
                             "gps_tracks" -> closedTrack(row, tables)
                             "media" -> relative(row.optString("filePath"))?.let { original ->
                                 destinations[original]?.takeIf { it != original }?.let { mapOf("filePath" to File(filesDir, it).path) }
-                            }.orEmpty()
+                            }.orEmpty() + mapOf(
+                                // Item apagado antes do numero fixo volta com o numero de antes.
+                                "mediaCode" to MediaCodes.free(db, row.optString("mediaCode").ifBlank { MediaCodes.legacy(row.optLong("id")) })
+                            )
                             else -> emptyMap()
                         }
                         val values = RowSnapshot.contentValues(row, columns, overrides = overrides)

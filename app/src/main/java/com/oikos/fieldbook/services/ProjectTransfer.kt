@@ -5,6 +5,7 @@ import com.oikos.fieldbook.util.UiLanguage
 import android.content.ContentValues
 import android.database.sqlite.SQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.oikos.fieldbook.data.MediaCodes
 import com.oikos.fieldbook.data.OikosDatabase
 import com.oikos.fieldbook.data.RowSnapshot
 import org.json.JSONArray
@@ -25,8 +26,37 @@ data class TransferManifest(
     val createdAt: Long,
     val sessions: Int,
     val occurrences: Int,
-    val media: Int
-)
+    val media: Int,
+    /** Coletor de quem enviou (recordedBy mais frequente nas expedicoes do pacote). */
+    val senderName: String = "",
+    /** Registros que existem nos dois aparelhos com conteudo diferente. */
+    val conflicts: List<TransferConflict> = emptyList(),
+    /** Projeto deste aparelho que ja tem as expedicoes do pacote (o destino provavel). */
+    val existingProjectId: Long? = null
+) {
+    /** Nome do projeto criado ao importar como novo: "Projeto (Maria Souza)". */
+    val newProjectName: String get() = ProjectTransfer.newProjectName(projectName, senderName)
+}
+
+/** Campo que difere entre o registro deste aparelho e o que chegou. */
+data class FieldDifference(val column: String, val local: String, val incoming: String)
+
+/**
+ * Expedicao ou ocorrencia editada nos dois celulares: o pesquisador escolhe
+ * qual versao fica. [key] identifica o registro em import (evt:<eventID> ou
+ * occ:<occurrenceID>).
+ */
+data class TransferConflict(
+    val key: String,
+    val isOccurrence: Boolean,
+    val title: String,
+    val subtitle: String,
+    val localUpdatedAt: Long,
+    val incomingUpdatedAt: Long,
+    val differences: List<FieldDifference>
+) {
+    val incomingIsNewer: Boolean get() = incomingUpdatedAt > localUpdatedAt
+}
 
 /** O que a importacao fez. */
 data class TransferSummary(
@@ -39,15 +69,16 @@ data class TransferSummary(
     val occurrencesAdded: Int,
     /** Ocorrencias que ja existiam: a versao deste aparelho foi mantida. */
     val occurrencesSkipped: Int,
-    /** Dessas, quantas chegaram com edicao mais nova que a deste aparelho. */
-    val occurrencesNewerInPackage: Int,
     val mediaAdded: Int,
     /** Midias registradas no pacote cujo arquivo nao veio junto. */
     val mediaWithoutFile: Int,
     val tracksAdded: Int,
     /** Trilhas que ja existiam e receberam pontos que faltavam. */
     val tracksExtended: Int,
-    val trackPointsAdded: Int
+    val trackPointsAdded: Int,
+    /** Expedicoes e ocorrencias em que o pesquisador escolheu a versao que chegou. */
+    val sessionsReplaced: Int = 0,
+    val occurrencesReplaced: Int = 0
 )
 
 /**
@@ -57,8 +88,9 @@ data class TransferSummary(
  * O pacote (.zip) tem projeto.json (as linhas do banco, coluna a coluna) e as
  * midias em files/. Na importacao todos os ids sao renumerados; expedicao com
  * o mesmo eventID e juntada a que ja existe e ocorrencia com o mesmo
- * occurrenceID e ignorada, entao importar o mesmo pacote duas vezes, ou um
- * pacote atualizado, nao duplica registros.
+ * occurrenceID nao entra de novo, entao importar o mesmo pacote duas vezes, ou
+ * um pacote atualizado, nao duplica registros. Se a expedicao ou a ocorrencia
+ * estiver diferente nos dois aparelhos, o pesquisador escolhe qual versao fica.
  */
 class ProjectTransfer(private val database: OikosDatabase, private val filesDir: File) {
 
@@ -115,6 +147,7 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
         }
     }
 
+    /** Le o pacote e compara com este aparelho (so leitura): nada e gravado. */
     fun readManifest(input: InputStream): TransferManifest {
         val document = readDocument(ZipInputStream(input.buffered()))
         val tables = document.getJSONObject("tables")
@@ -125,15 +158,95 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
             createdAt = document.optLong("createdAt"),
             sessions = tables.optJSONArray("sessions")?.length() ?: 0,
             occurrences = tables.optJSONArray("occurrences")?.length() ?: 0,
-            media = tables.optJSONArray("media")?.length() ?: 0
+            media = tables.optJSONArray("media")?.length() ?: 0,
+            senderName = senderName(tables),
+            conflicts = conflicts(tables),
+            existingProjectId = existingProject(tables)
         )
+    }
+
+    /** Projeto deste aparelho com mais expedicoes do pacote (mesmo eventID), se houver. */
+    private fun existingProject(tables: JSONObject): Long? {
+        val db = database.openHelper.readableDatabase
+        val sessions = tables.optJSONArray("sessions") ?: return null
+        return (0 until sessions.length())
+            .mapNotNull { existingSession(db, sessions.getJSONObject(it).optString("eventId"))?.projectId }
+            .groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+    }
+
+    /**
+     * Expedicoes e ocorrencias do pacote que ja existem aqui (mesmo eventID ou
+     * occurrenceID) com algum campo diferente. Iguais nao entram: nao ha o que
+     * escolher.
+     */
+    private fun conflicts(tables: JSONObject): List<TransferConflict> {
+        val db = database.openHelper.readableDatabase
+        val result = mutableListOf<TransferConflict>()
+        (tables.optJSONArray("sessions") ?: JSONArray()).forEachObject { row ->
+            val place = existingSession(db, row.optString("eventId")) ?: return@forEachObject
+            val local = RowSnapshot.rows(db, "sessions", "id = ?", arrayOf(place.sessionId)).optJSONObject(0) ?: return@forEachObject
+            val differences = differences(local, row)
+            if (differences.isEmpty()) return@forEachObject
+            result += TransferConflict(
+                key = SESSION_KEY + row.optString("eventId"),
+                isOccurrence = false,
+                title = row.optString("name").ifBlank { row.optString("eventId") },
+                subtitle = listOf(row.optString("eventDate"), row.optString("recordedBy")).filter { it.isNotBlank() }.joinToString(" · "),
+                localUpdatedAt = local.optLong("updatedAt"),
+                incomingUpdatedAt = row.optLong("updatedAt"),
+                differences = differences
+            )
+        }
+        (tables.optJSONArray("occurrences") ?: JSONArray()).forEachObject { row ->
+            val existing = existingOccurrence(db, row.optString("occurrenceId")) ?: return@forEachObject
+            val local = RowSnapshot.rows(db, "occurrences", "id = ?", arrayOf(existing.id)).optJSONObject(0) ?: return@forEachObject
+            val differences = differences(local, row)
+            if (differences.isEmpty()) return@forEachObject
+            result += TransferConflict(
+                key = OCCURRENCE_KEY + row.optString("occurrenceId"),
+                isOccurrence = true,
+                title = row.optString("scientificName").ifBlank { row.optString("vernacularName") }
+                    .ifBlank { local.optString("scientificName") }.ifBlank { local.optString("vernacularName") },
+                subtitle = listOf(row.optString("recordNumber"), row.optString("recordedBy")).filter { it.isNotBlank() }.joinToString(" · "),
+                localUpdatedAt = local.optLong("updatedAt"),
+                incomingUpdatedAt = row.optLong("updatedAt"),
+                differences = differences
+            )
+        }
+        return result
+    }
+
+    /**
+     * Campos com valor diferente. Vazio e nulo contam como iguais, numeros sao
+     * comparados como numeros, e os campos personalizados (dynamicFieldsJson)
+     * campo a campo, como "dyn:<termo>".
+     */
+    private fun differences(local: JSONObject, incoming: JSONObject): List<FieldDifference> {
+        val result = mutableListOf<FieldDifference>()
+        incoming.keys().forEach { column ->
+            if (column in NOT_COMPARED || column.startsWith("_") || !local.has(column)) return@forEach
+            val mine = local.opt(column)
+            val theirs = incoming.opt(column)
+            if (column == DYNAMIC_FIELDS) {
+                val a = runCatching { JSONObject(text(mine).ifBlank { "{}" }) }.getOrElse { JSONObject() }
+                val b = runCatching { JSONObject(text(theirs).ifBlank { "{}" }) }.getOrElse { JSONObject() }
+                (a.keys().asSequence() + b.keys().asSequence()).toSortedSet().forEach { key ->
+                    if (!same(a.opt(key), b.opt(key))) result += FieldDifference("dyn:$key", text(a.opt(key)), text(b.opt(key)))
+                }
+            } else if (!same(mine, theirs)) {
+                result += FieldDifference(column, text(mine), text(theirs))
+            }
+        }
+        return result
     }
 
     /**
      * [targetProjectId] nulo cria um projeto novo; senao junta ao projeto indicado.
+     * [takeIncoming] tem as chaves (TransferConflict.key) dos registros em que o
+     * pesquisador escolheu a versao que chegou; nos outros fica a deste aparelho.
      * Nada e gravado se qualquer linha for recusada pelo banco.
      */
-    fun import(input: InputStream, targetProjectId: Long?): TransferSummary {
+    fun import(input: InputStream, targetProjectId: Long?, takeIncoming: Set<String> = emptySet()): TransferSummary {
         val stagingRoot = File(filesDir, STAGING_DIR).apply { mkdirs() }
         // Sobra de importacao interrompida (app fechado a forca) ocupa espaco.
         stagingRoot.listFiles().orEmpty()
@@ -161,7 +274,7 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
             }
             val tables = document.getJSONObject("tables")
             val moves = mutableListOf<Pair<File, File>>()
-            val summary = insert(tables, targetProjectId, staging, moves)
+            val summary = insert(tables, targetProjectId, takeIncoming, staging, moves)
             // O banco ja aceitou as linhas: um arquivo que nao puder ser movido
             // (disco cheio) e contado no resumo, em vez de virar um erro que
             // diria "nada foi alterado".
@@ -183,7 +296,7 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
     /** Expedicao do aparelho que recebe as linhas de uma expedicao do pacote. */
     private data class Place(val projectId: Long, val sessionId: Long)
 
-    private fun insert(tables: JSONObject, targetProjectId: Long?, staging: File, moves: MutableList<Pair<File, File>>): TransferSummary {
+    private fun insert(tables: JSONObject, targetProjectId: Long?, takeIncoming: Set<String>, staging: File, moves: MutableList<Pair<File, File>>): TransferSummary {
         val db = database.openHelper.writableDatabase
         val projectsRoot = File(filesDir, "Projetos").canonicalFile
         var summary: TransferSummary? = null
@@ -199,7 +312,8 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
                     throw IOException(UiLanguage.t("este pacote já foi importado no projeto \"$name\". Para trazer novidades, escolha juntar a esse projeto", "this package was already imported into the project \"$name\". To bring in new data, choose to merge into that project"))
                 }
                 val projectRow = tables.getJSONArray("projects").optJSONObject(0) ?: throw IOException(UiLanguage.t("o pacote não traz o projeto", "the package does not contain the project"))
-                val name = uniqueProjectName(db, projectRow.optString("name").ifBlank { "Projeto importado" })
+                // Projeto novo leva o nome de quem enviou: "Projeto (Maria Souza)".
+                val name = uniqueProjectName(db, newProjectName(projectRow.optString("name").ifBlank { "Projeto importado" }, senderName(tables)))
                 projectId = db.insert("projects", SQLiteDatabase.CONFLICT_ABORT, RowSnapshot.contentValues(
                     projectRow, RowSnapshot.columns(db, "projects"), skip = setOf("id"),
                     overrides = mapOf("name" to name, "updatedAt" to System.currentTimeMillis())
@@ -222,6 +336,7 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
             var sessionsAdded = 0
             var sessionsMerged = 0
             var sessionsInOtherProject = 0
+            var sessionsReplaced = 0
             val sessionColumns = RowSnapshot.columns(db, "sessions")
             (tables.optJSONArray("sessions") ?: JSONArray()).forEachObject { row ->
                 val existing = existingSession(db, row.optString("eventId"))
@@ -229,6 +344,11 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
                     places[row.getLong("id")] = existing
                     sessionsMerged++
                     if (existing.projectId != projectId) sessionsInOtherProject++
+                    // Editada nos dois aparelhos e o pesquisador escolheu a que chegou.
+                    if (SESSION_KEY + row.optString("eventId") in takeIncoming) {
+                        replaceWithIncoming(db, "sessions", existing.sessionId, row, sessionColumns)
+                        sessionsReplaced++
+                    }
                 } else {
                     val id = db.insert("sessions", SQLiteDatabase.CONFLICT_ABORT, RowSnapshot.contentValues(
                         row, sessionColumns, skip = setOf("id"), overrides = mapOf("projectId" to projectId)
@@ -238,19 +358,23 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
                 }
             }
 
-            // Ocorrencia que ja existe (mesmo occurrenceID) nao e duplicada nem
-            // sobrescrita, mas continua recebendo as midias novas.
+            // Ocorrencia que ja existe (mesmo occurrenceID) nao e duplicada; so e
+            // sobrescrita se o pesquisador escolheu a versao que chegou. Continua
+            // recebendo as midias novas.
             val occurrences = mutableMapOf<Long, Pair<Place, Long>>()
             var occurrencesAdded = 0
             var occurrencesSkipped = 0
-            var occurrencesNewer = 0
+            var occurrencesReplaced = 0
             val occurrenceColumns = RowSnapshot.columns(db, "occurrences")
             (tables.optJSONArray("occurrences") ?: JSONArray()).forEachObject { row ->
                 val local = existingOccurrence(db, row.optString("occurrenceId"))
                 if (local != null) {
                     occurrences[row.getLong("id")] = local.place to local.id
                     occurrencesSkipped++
-                    if (row.optLong("updatedAt") > local.updatedAt) occurrencesNewer++
+                    if (OCCURRENCE_KEY + row.optString("occurrenceId") in takeIncoming) {
+                        replaceWithIncoming(db, "occurrences", local.id, row, occurrenceColumns)
+                        occurrencesReplaced++
+                    }
                     return@forEachObject
                 }
                 val place = places[row.getLong("sessionId")] ?: throw IOException(UiLanguage.t("pacote incompleto: ocorrência sem a expedição dela", "incomplete package: occurrence without its expedition"))
@@ -289,7 +413,10 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
                     row, mediaColumns, skip = setOf("id", RELATIVE_KEY),
                     overrides = mapOf(
                         "projectId" to place.projectId, "sessionId" to place.sessionId, "occurrenceId" to occurrenceId,
-                        "filePath" to target.path
+                        "filePath" to target.path,
+                        // O numero fixo viaja com a midia; pacote de versao anterior traz o
+                        // numero que o outro aparelho exportava (MED + id dele).
+                        "mediaCode" to MediaCodes.free(db, row.optString("mediaCode").ifBlank { MediaCodes.legacy(row.getLong("id")) })
                     )
                 ))
                 if (staged != null) moves += staged to target else mediaWithoutFile++
@@ -353,12 +480,13 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
                 sessionsInOtherProject = sessionsInOtherProject,
                 occurrencesAdded = occurrencesAdded,
                 occurrencesSkipped = occurrencesSkipped,
-                occurrencesNewerInPackage = occurrencesNewer,
                 mediaAdded = mediaAdded,
                 mediaWithoutFile = mediaWithoutFile,
                 tracksAdded = tracksAdded,
                 tracksExtended = tracksExtended,
-                trackPointsAdded = pointsAdded
+                trackPointsAdded = pointsAdded,
+                sessionsReplaced = sessionsReplaced,
+                occurrencesReplaced = occurrencesReplaced
             )
         }
         return summary!!
@@ -466,15 +594,86 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
         }
     }
 
+    /**
+     * Troca os campos do registro deste aparelho pelos que chegaram, so os que
+     * o pacote traz: uma coluna que um pacote de versao anterior nao tem fica
+     * como esta (contentValues a preencheria com vazio).
+     */
+    private fun replaceWithIncoming(db: SupportSQLiteDatabase, table: String, localId: Long, row: JSONObject, columns: Map<String, RowSnapshot.Column>) {
+        val values = RowSnapshot.contentValues(row, columns, skip = NOT_COMPARED - "updatedAt")
+        val present = row.keys().asSequence().toSet()
+        values.keySet().filter { it !in present }.forEach(values::remove)
+        if (values.size() > 0) db.update(table, SQLiteDatabase.CONFLICT_ABORT, values, "id = ?", arrayOf(localId))
+    }
+
     private inline fun JSONArray.forEachObject(action: (JSONObject) -> Unit) {
         for (i in 0 until length()) action(getJSONObject(i))
     }
 
     companion object {
         const val FORMAT = "oikos-projeto-1"
+        const val SESSION_KEY = "evt:"
+        const val OCCURRENCE_KEY = "occ:"
         private const val DATA_ENTRY = "projeto.json"
         private const val RELATIVE_KEY = "_arquivoNoPacote"
         private const val STAGING_DIR = "import-staging"
         private const val STALE_STAGING_MILLIS = 6 * 60 * 60 * 1000L
+        private const val DYNAMIC_FIELDS = "dynamicFieldsJson"
+
+        /** Colunas que mudam de um aparelho para o outro sem ser edicao do registro. */
+        private val NOT_COMPARED = setOf("id", "projectId", "sessionId", "createdAt", "updatedAt")
+
+        /**
+         * "Projeto (Maria Souza)"; sem coletor no pacote, so o nome do projeto. Um
+         * pacote que volta (o projeto ja tem o nome de quem enviou) nao ganha o
+         * nome duas vezes.
+         */
+        fun newProjectName(projectName: String, senderName: String): String =
+            if (senderName.isBlank() || projectName.endsWith(" ($senderName)")) projectName else "$projectName ($senderName)"
+
+        /**
+         * Coletor de quem enviou: o recordedBy mais frequente nas expedicoes do
+         * pacote (o das ocorrencias, se as expedicoes nao tiverem). Com varios
+         * coletores ("A | B"), vale o primeiro.
+         */
+        fun senderName(tables: JSONObject): String {
+            fun recordedBy(table: String): List<String> {
+                val rows = tables.optJSONArray(table) ?: return emptyList()
+                return (0 until rows.length()).map { i -> rows.optJSONObject(i)?.optString("recordedBy").orEmpty() }
+            }
+            return senderName(recordedBy("sessions"), recordedBy("occurrences"))
+        }
+
+        /** O mesmo, a partir dos recordedBy das expedicoes e das ocorrencias. */
+        fun senderName(sessionCollectors: List<String>, occurrenceCollectors: List<String>): String {
+            fun firsts(values: List<String>) = values.mapNotNull { value ->
+                value.split('|', ';').map { it.trim() }.firstOrNull { it.isNotEmpty() }
+            }
+            val names = firsts(sessionCollectors).ifEmpty { firsts(occurrenceCollectors) }
+            // eachCount guarda a ordem de chegada: no empate, vence o primeiro.
+            return names.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key.orEmpty()
+        }
+
+        /** Mesmo valor: vazio e nulo iguais, numeros comparados como numeros. */
+        internal fun same(a: Any?, b: Any?): Boolean {
+            val x = normalized(a)
+            val y = normalized(b)
+            if (x is Double && y is Double) return kotlin.math.abs(x - y) <= 1e-9 * maxOf(1.0, kotlin.math.abs(x), kotlin.math.abs(y))
+            return x == y
+        }
+
+        private fun normalized(value: Any?): Any? = when (value) {
+            null, JSONObject.NULL -> null
+            is Number -> value.toDouble()
+            else -> value.toString().ifBlank { null }
+        }
+
+        /** Valor para mostrar ao pesquisador: 12 em vez de 12.0, sem notacao cientifica. */
+        internal fun text(value: Any?): String = when (value) {
+            null, JSONObject.NULL -> ""
+            is Double -> java.math.BigDecimal.valueOf(value).stripTrailingZeros().toPlainString()
+            is Float -> java.math.BigDecimal.valueOf(value.toDouble()).stripTrailingZeros().toPlainString()
+            else -> value.toString()
+        }
     }
 }

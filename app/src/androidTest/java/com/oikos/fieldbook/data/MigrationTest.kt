@@ -151,6 +151,42 @@ class MigrationTest {
     }
 
     @Test
+    fun migracao8para9DaAsMidiasAntigasONumeroQueAExportacaoJaUsava() {
+        helper.createDatabase(TEST_DB, 8).apply {
+            execSQL(
+                "INSERT INTO projects (id, name, description, institution, principalInvestigator, language, defaultDatum, coordinateFormat, " +
+                    "photoQuality, audioFormat, enableFauna, enableBotany, enableFungi, license, mediaBaseUrl, csvStyle, nameGroups, createdAt, updatedAt) " +
+                    "VALUES (1, 'P', '', '', '', 'pt', 'SIRGAS 2000', 'DD', 'medium', 'wav', 1, 0, 0, '', '', 'br', '', 0, 0)"
+            )
+            execSQL(
+                "INSERT INTO sessions (id, projectId, eventId, name, eventDate, startTime, endTime, locality, municipality, " +
+                    "stateProvince, country, habitat, environmentType, samplingProtocol, samplingEffort, parentEventId, " +
+                    "sampleSizeValue, sampleSizeUnit, verbatimEventDate, recordedBy, fieldTeam, gpsTrackEnabled, latitude, " +
+                    "longitude, altitude, coordinateUncertaintyInMeters, geodeticDatum, coordinateCapturedAt, notes, createdAt, updatedAt) " +
+                    "VALUES (1, 1, 'e1', 'S', '', '', '', '', '', '', '', '', '', '', '', '', NULL, '', '', 'Luan Maciel', '', 0, NULL, NULL, " +
+                    "NULL, NULL, 'SIRGAS 2000', NULL, '', 0, 0)"
+            )
+            listOf(1, 7).forEach { id ->
+                execSQL(
+                    "INSERT INTO media (id, projectId, sessionId, occurrenceId, mediaType, filePath, fileName, mimeType, createdAt, latitude, longitude, coordinateUncertaintyInMeters, caption, mediaSubject, bodyPartOrPlantPart, behaviorContext, notes, durationMillis, sampleRateHz, bitsPerSample, channels, audioSource, captureDevice, microphone, airTemperature, relativeHumidity, distanceToSourceMeters, captureTimeKnown) " +
+                        "VALUES ($id, 1, 1, NULL, 'photo', '/x/$id.jpg', '$id.jpg', 'image/jpeg', 5, NULL, NULL, NULL, '', '', '', '', '', NULL, NULL, NULL, NULL, '', '', '', NULL, NULL, NULL, 1)"
+                )
+            }
+            close()
+        }
+        val db = helper.runMigrationsAndValidate(TEST_DB, 9, true, *OikosDatabase.ALL_MIGRATIONS)
+        db.query("SELECT id, mediaCode FROM media ORDER BY id").use { cursor ->
+            cursor.moveToNext()
+            assertEquals("MED-000001", cursor.getString(1))
+            cursor.moveToNext()
+            assertEquals("MED-000007", cursor.getString(1))
+        }
+        // Midia nova depois da migracao: iniciais do coletor da expedicao.
+        assertEquals("LM-0001", MediaCodes.next(db, sessionId = 1, occurrenceId = null))
+        assertEquals("LM-0002", MediaCodes.next(db, sessionId = 1, occurrenceId = null))
+    }
+
+    @Test
     fun migracaoRepetidaNaoQuebra() {
         // As migracoes usam addColumnIfMissing: rodar de novo nao pode falhar.
         helper.createDatabase(TEST_DB, 4).close()

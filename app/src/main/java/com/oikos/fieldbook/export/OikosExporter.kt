@@ -4,6 +4,7 @@ import com.oikos.fieldbook.util.UiLanguage
 import com.oikos.fieldbook.util.inProjectLanguage
 
 import com.oikos.fieldbook.data.FieldConfigEntity
+import com.oikos.fieldbook.data.MediaCodes
 import com.oikos.fieldbook.data.MediaEntity
 import com.oikos.fieldbook.data.OccurrenceEntity
 import com.oikos.fieldbook.data.ProjectEntity
@@ -957,7 +958,7 @@ private class ExportPackage(
             val fileName = uniqueMediaFileName(item, occurrence, session, extension)
             val relativePath = "${paths.media}/$folder/$fileName"
             MediaLink(
-                mediaID = "MED-${item.id.toString().padStart(6, '0')}",
+                mediaID = item.mediaCode.ifBlank { MediaCodes.legacy(item.id) },
                 projectID = "PROJ-${item.projectId.toString().padStart(3, '0')}",
                 eventID = session?.eventId.orEmpty(),
                 sessionInternalId = item.sessionId,
@@ -999,11 +1000,11 @@ private class ExportPackage(
         extension: String
     ): String {
         // A especie e a de AGORA: corrigir a identificacao antes de exportar
-        // renomeia o arquivo exportado. O numero da midia no fim (MED000123)
-        // nunca muda e torna o nome unico; antes era um contador -01/-02 que
-        // dependia da ordem das midias.
+        // renomeia o arquivo exportado. O numero fixo da midia no fim
+        // (LSCM0001; MED000123 nas anteriores a ele) nunca muda e torna o nome
+        // unico; antes era um contador -01/-02 que dependia da ordem das midias.
         val base = safeToken(exportMediaBaseName(media, occurrence, session))
-        return "${base}_MED${media.id.toString().padStart(6, '0')}.$extension"
+        return "${base}_${MediaCodes.fileToken(media.mediaCode.ifBlank { MediaCodes.legacy(media.id) })}.$extension"
     }
 
     private fun exportMediaBaseName(media: MediaEntity, occurrence: OccurrenceEntity?, session: SessionEntity?): String {

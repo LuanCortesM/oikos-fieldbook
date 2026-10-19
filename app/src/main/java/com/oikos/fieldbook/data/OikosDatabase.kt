@@ -15,7 +15,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         OccurrenceEntity::class,
         MediaEntity::class,
         GpsTrackEntity::class,
-        GpsTrackPointEntity::class
+        GpsTrackPointEntity::class,
+        MediaCodeCounterEntity::class
     ],
     version = OikosDatabase.VERSION,
     exportSchema = true
@@ -30,7 +31,7 @@ abstract class OikosDatabase : RoomDatabase() {
 
     companion object {
         /** Versao atual do esquema; o backup recusa arquivos de versao maior. */
-        const val VERSION = 8
+        const val VERSION = 9
 
         fun create(context: Context): OikosDatabase =
             Room.databaseBuilder(context, OikosDatabase::class.java, "oikos_fieldbook.db")
@@ -41,10 +42,11 @@ abstract class OikosDatabase : RoomDatabase() {
                 .addMigrations(MIGRATION_5_6)
                 .addMigrations(MIGRATION_6_7)
                 .addMigrations(MIGRATION_7_8)
+                .addMigrations(MIGRATION_8_9)
                 .build()
 
         /** Visivel para o teste de migracao. */
-        val ALL_MIGRATIONS: Array<Migration> get() = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+        val ALL_MIGRATIONS: Array<Migration> get() = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -178,6 +180,19 @@ abstract class OikosDatabase : RoomDatabase() {
         private val MIGRATION_7_8 = object : Migration(7, 8) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 addColumnIfMissing(db, "projects", "nameGroups", "TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /**
+         * Numero fixo das midias, que viaja com elas entre celulares. As que ja
+         * existiam ficam com o numero que a exportacao ja usava (MED-000123).
+         */
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                addColumnIfMissing(db, "media", "mediaCode", "TEXT NOT NULL DEFAULT ''")
+                db.execSQL("UPDATE media SET mediaCode = 'MED-' || printf('%06d', id) WHERE mediaCode = ''")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_media_mediaCode` ON `media` (`mediaCode`)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `media_code_counters` (`prefix` TEXT NOT NULL, `lastNumber` INTEGER NOT NULL, PRIMARY KEY(`prefix`))")
             }
         }
 

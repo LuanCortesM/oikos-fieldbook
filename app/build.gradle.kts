@@ -102,6 +102,9 @@ dependencies {
     implementation("androidx.room:room-ktx:$roomVersion")
     implementation("androidx.exifinterface:exifinterface:1.4.2")
     implementation("com.google.android.gms:play-services-location:21.3.0")
+    // Envio de pacote para celular proximo, sem internet (Bluetooth + Wi-Fi direto).
+    // 19.3.0: as versoes 19.4+ foram compiladas com Kotlin 2.4, mais novo que o do projeto.
+    implementation("com.google.android.gms:play-services-nearby:19.3.0")
     implementation("org.osmdroid:osmdroid-android:6.1.20")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     // QR code das etiquetas de herbario (so o nucleo do ZXing, Apache 2.0).

@@ -198,4 +198,83 @@ class ProjectTransferTest {
             assertTrue(expected.message!!.contains("Restaurar"))
         }
     }
+
+    @Test
+    fun projetoNovoLevaONomeDeQuemEnviou() = runBlocking {
+        phoneA.sessionDao().update(phoneA.sessionDao().getSession(1)!!.copy(recordedBy = "Ana Souza | Bruno Lima"))
+        val manifest = ProjectTransfer(phoneB, filesB).readManifest(ByteArrayInputStream(packageFromA()))
+        assertEquals("Ana Souza", manifest.senderName)
+        assertEquals("Anuros (Ana Souza)", manifest.newProjectName)
+        val summary = ProjectTransfer(phoneB, filesB).import(ByteArrayInputStream(packageFromA()), null)
+        assertEquals("Anuros (Ana Souza)", phoneB.projectDao().getProject(summary.projectId)!!.name)
+    }
+
+    @Test
+    fun editadoNosDoisCelularesFicaAVersaoEscolhida() = runBlocking {
+        val first = ProjectTransfer(phoneB, filesB).import(ByteArrayInputStream(packageFromA()), null)
+        fun inB() = runBlocking { phoneB.occurrenceDao().getForProject(first.projectId).first { it.occurrenceId == "OC-A-1" } }
+        // B anotou o sexo; A corrigiu a especie e contou os individuos, depois.
+        val originalInB = inB()
+        phoneB.occurrenceDao().update(originalInB.copy(sex = "female", updatedAt = 2_000))
+        val inA = phoneA.occurrenceDao().getForProject(1).first { it.occurrenceId == "OC-A-1" }
+        phoneA.occurrenceDao().update(inA.copy(scientificName = "Boana albomarginata", individualCount = 3, updatedAt = 3_000))
+
+        val manifest = ProjectTransfer(phoneB, filesB).readManifest(ByteArrayInputStream(packageFromA()))
+        assertEquals("destino provavel: o projeto que ja tem as expedicoes", first.projectId, manifest.existingProjectId)
+        val conflict = manifest.conflicts.single()
+        assertEquals(ProjectTransfer.OCCURRENCE_KEY + "OC-A-1", conflict.key)
+        assertTrue("a do outro celular foi editada por ultimo", conflict.incomingIsNewer)
+        assertEquals(setOf("scientificName", "individualCount", "sex"), conflict.differences.map { it.column }.toSet())
+
+        // Sem escolher a que chegou, fica a deste aparelho.
+        val kept = ProjectTransfer(phoneB, filesB).import(ByteArrayInputStream(packageFromA()), first.projectId)
+        assertEquals(0, kept.occurrencesReplaced)
+        assertEquals("Boana faber", inB().scientificName)
+        assertEquals("female", inB().sex)
+
+        // Escolhendo a que chegou: todos os campos dela, no mesmo lugar.
+        val replaced = ProjectTransfer(phoneB, filesB).import(ByteArrayInputStream(packageFromA()), first.projectId, setOf(conflict.key))
+        assertEquals(1, replaced.occurrencesReplaced)
+        val after = inB()
+        assertEquals("Boana albomarginata", after.scientificName)
+        assertEquals(3, after.individualCount)
+        assertEquals("", after.sex)
+        assertEquals(originalInB.id, after.id)
+        assertEquals(originalInB.sessionId, after.sessionId)
+        assertEquals(3_000L, after.updatedAt)
+        assertEquals("agora iguais: nada a escolher", 0, ProjectTransfer(phoneB, filesB).readManifest(ByteArrayInputStream(packageFromA())).conflicts.size)
+    }
+
+    @Test
+    fun numeroDaMidiaViajaComElaEGanhaLetraSeJaExistir() = runBlocking {
+        phoneA.occurrenceDao().update(phoneA.occurrenceDao().getForProject(1).first { it.id == 1L }.copy(recordedBy = "Ana Souza"))
+        val photo = File(filesA, "Projetos/PROJ-1/EXP-1/Fotos/foto.jpg").apply { parentFile?.mkdirs(); writeText("JPG") }
+        val id = OikosRepository(phoneA).createMedia(
+            MediaEntity(projectId = 1, sessionId = 1, occurrenceId = 1, mediaType = "photo", filePath = photo.path, fileName = "foto.jpg", mimeType = "image/jpeg")
+        )
+        assertEquals("AS-0001", phoneA.mediaDao().getForProject(1).first { it.id == id }.mediaCode)
+        // Em B ja ha outra midia AS-0001 (outra pessoa da equipe com as mesmas iniciais).
+        phoneB.mediaDao().insert(MediaEntity(projectId = 1, sessionId = 1, mediaType = "photo", filePath = "x", fileName = "outra.jpg", mimeType = "image/jpeg", mediaCode = "AS-0001"))
+
+        val summary = ProjectTransfer(phoneB, filesB).import(ByteArrayInputStream(packageFromA()), null)
+        val codes = phoneB.mediaDao().getForProject(summary.projectId).associate { it.fileName to it.mediaCode }
+        assertEquals("AS-0001b", codes["foto.jpg"])
+        // Midia de antes do numero fixo: o numero que o outro aparelho exportava.
+        assertEquals("MED-000001", codes["canto.wav"])
+    }
+
+    @Test
+    fun numeroDeMidiaApagadaNaoVoltaASerUsado() = runBlocking {
+        phoneA.sessionDao().update(phoneA.sessionDao().getSession(1)!!.copy(recordedBy = "Luan da Silva Cortes Maciel"))
+        val repository = OikosRepository(phoneA)
+        fun media(name: String) = MediaEntity(projectId = 1, sessionId = 1, mediaType = "photo", filePath = "/x/$name", fileName = name, mimeType = "image/jpeg")
+        val first = repository.createMedia(media("1.jpg"))
+        val second = repository.createMedia(media("2.jpg"))
+        val all = phoneA.mediaDao().getForProject(1).associateBy { it.id }
+        assertEquals("LSCM-0001", all.getValue(first).mediaCode)
+        assertEquals("LSCM-0002", all.getValue(second).mediaCode)
+        phoneA.mediaDao().delete(all.getValue(second))
+        val third = repository.createMedia(media("3.jpg"))
+        assertEquals("LSCM-0003", phoneA.mediaDao().getForProject(1).first { it.id == third }.mediaCode)
+    }
 }

@@ -193,7 +193,7 @@ data class OccurrenceEntity(
             onDelete = ForeignKey.CASCADE
         )
     ],
-    indices = [Index("projectId"), Index("sessionId"), Index("occurrenceId"), Index("mediaType")]
+    indices = [Index("projectId"), Index("sessionId"), Index("occurrenceId"), Index("mediaType"), Index("mediaCode")]
 )
 data class MediaEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -237,7 +237,21 @@ data class MediaEntity(
      * importacao, e a exportacao deixa a data de captura em branco (v7).
      */
     @ColumnInfo(defaultValue = "1")
-    val captureTimeKnown: Boolean = true
+    val captureTimeKnown: Boolean = true,
+    /**
+     * Numero fixo da midia (LSCM-0001; MED-000123 nas anteriores a v9), que
+     * viaja com ela entre celulares. Vazio so antes de gravar: o repositorio
+     * preenche ao inserir (ver MediaCodes).
+     */
+    @ColumnInfo(defaultValue = "")
+    val mediaCode: String = ""
+)
+
+/** Ultimo numero de midia usado neste aparelho para cada prefixo (iniciais do coletor). */
+@Entity(tableName = "media_code_counters")
+data class MediaCodeCounterEntity(
+    @PrimaryKey val prefix: String,
+    val lastNumber: Int
 )
 
 @Entity(

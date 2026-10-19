@@ -1021,6 +1021,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (_recording.value != null) {
             wavRecorder.stop()
         }
+        // Nem fica anunciando ou procurando celulares depois que o app fecha.
+        nearby.close()
         super.onCleared()
     }
 
@@ -1327,7 +1329,32 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val scopeName = sessionId?.let { id -> repository.getSession(id)?.let { it.name.ifBlank { it.eventId } } } ?: project.name
             val file = mediaFiles.newExportFile(com.oikos.fieldbook.util.inProjectLanguage(project.language, "pacote_", "package_") + "${OikosExporter.safeName(scopeName)}_${LocalDate.now()}.zip")
             file.outputStream().use { transfer.export(projectId, sessionId, it, "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})") }
-            ExportResult(file, "application/zip", t("Envie o pacote ao outro celular (WhatsApp, e-mail, Drive ou cabo) e, lá, toque em Importar de outro celular na tela inicial.", "Send the package to the other phone (WhatsApp, email, Drive or cable) and, there, tap Import from another phone on the home screen."))
+            ExportResult(file, "application/zip", t("Envie o pacote ao outro celular (WhatsApp, e-mail, Drive ou cabo) e, lá, toque em Receber de outro celular na tela inicial e escolha De um arquivo.", "Send the package to the other phone (WhatsApp, email, Drive or cable) and, there, tap Receive from another phone on the home screen and choose From a file."))
+        }
+    }
+
+    // ------------------------------------------- envio direto para celular proximo
+
+    val nearby = com.oikos.fieldbook.services.NearbyTransfer(application)
+
+    /** Monta o pacote e abre a busca por celulares com o "Receber" aberto. */
+    fun startNearbySend(projectId: Long, sessionId: Long?) {
+        viewModelScope.launch {
+            val prepared = runCatching {
+                withContext(Dispatchers.IO) {
+                    val project = repository.getProject(projectId) ?: throw java.io.IOException(t("projeto não encontrado", "project not found"))
+                    val sessions = if (sessionId == null) repository.getSessions(projectId) else listOfNotNull(repository.getSession(sessionId))
+                    val occurrences = if (sessionId == null) repository.getOccurrences(projectId) else repository.getOccurrencesForSession(sessionId)
+                    val folder = File(getApplication<Application>().cacheDir, "envios").apply { mkdirs() }
+                    folder.listFiles().orEmpty().forEach { it.delete() }
+                    val file = File(folder, "pacote-${System.currentTimeMillis()}.zip")
+                    file.outputStream().use { transfer.export(projectId, sessionId, it, "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})") }
+                    val sender = ProjectTransfer.senderName(sessions.map { it.recordedBy }, occurrences.map { it.recordedBy })
+                    Triple(file, sender, project.name)
+                }
+            }
+            prepared.onSuccess { (file, sender, projectName) -> nearby.startSending(file, sender, projectName) }
+                .onFailure { _message.value = t("Não foi possível montar o pacote: ${why(it)}", "Could not build the package: ${why(it)}") }
         }
     }
 
@@ -1340,7 +1367,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private var importing = false
 
-    fun importProjectPackage(uri: Uri, targetProjectId: Long?, onDone: (Long) -> Unit) {
+    /** [takeIncoming]: chaves dos registros em conflito em que fica a versao que chegou. */
+    fun importProjectPackage(uri: Uri, targetProjectId: Long?, takeIncoming: Set<String>, cleanup: File? = null, onDone: (Long) -> Unit) {
         // Dois toques seguidos importavam o mesmo pacote duas vezes ao mesmo tempo.
         if (importing) return
         importing = true
@@ -1348,7 +1376,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             _message.value = t("Importando o pacote...", "Importing the package...")
             runCatching {
                 withContext(Dispatchers.IO) {
-                    getApplication<Application>().contentResolver.openInputStream(uri)?.use { transfer.import(it, targetProjectId) }
+                    getApplication<Application>().contentResolver.openInputStream(uri)?.use { transfer.import(it, targetProjectId, takeIncoming) }
                         ?: throw java.io.IOException(t("não foi possível ler o arquivo", "could not read the file"))
                 }
             }.onSuccess { result ->
@@ -1357,6 +1385,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }.onFailure {
                 _message.value = t("Não foi possível importar: ${why(it)}. Nada foi alterado.", "Could not import: ${why(it)}. Nothing was changed.")
             }
+            // Pacote recebido de celular proximo fica no cache so ate ser importado.
+            cleanup?.delete()
             importing = false
         }
     }
@@ -1389,14 +1419,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 if (skipped == 1) t(" 1 ocorrência já existia e não foi duplicada", " 1 occurrence already existed and was not duplicated")
                 else t(" $skipped ocorrências já existiam e não foram duplicadas", " $skipped occurrences already existed and were not duplicated")
             )
-            val newer = result.occurrencesNewerInPackage
-            if (newer > 0) {
-                append(
-                    if (newer == 1) t("; 1 foi editada depois no outro celular, mas a versão deste aparelho foi mantida", "; 1 was edited later on the other phone, but this phone's version was kept")
-                    else t("; $newer foram editadas depois no outro celular, mas a versão deste aparelho foi mantida", "; $newer were edited later on the other phone, but this phone's version was kept")
-                )
-            }
             append(".")
+        }
+        // Registros editados nos dois celulares em que o pesquisador escolheu a versao que chegou.
+        val replaced = result.sessionsReplaced + result.occurrencesReplaced
+        if (replaced > 0) {
+            append(" ").append(qty(replaced, "registro ficou", "registros ficaram", "record now has", "records now have"))
+            append(t(" com a versão do outro celular, como você escolheu.", " the other phone's version, as you chose."))
         }
         if (result.tracksExtended > 0) {
             append(" ").append(qty(result.tracksExtended, "trilha recebeu", "trilhas receberam", "track received", "tracks received"))

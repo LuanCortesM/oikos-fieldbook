@@ -110,7 +110,11 @@ class OikosRepository(private val db: OikosDatabase) {
     suspend fun getOccurrences(projectId: Long): List<OccurrenceEntity> = db.occurrenceDao().getForProject(projectId)
     suspend fun getOccurrencesForSession(sessionId: Long): List<OccurrenceEntity> = db.occurrenceDao().getForSession(sessionId)
 
-    suspend fun createMedia(media: MediaEntity): Long = db.mediaDao().insert(media)
+    /** Grava a midia com o numero fixo dela (iniciais do coletor + sequencia deste aparelho). */
+    suspend fun createMedia(media: MediaEntity): Long = db.withTransaction {
+        val code = media.mediaCode.ifBlank { MediaCodes.next(db.openHelper.writableDatabase, media.sessionId, media.occurrenceId) }
+        db.mediaDao().insert(media.copy(mediaCode = code))
+    }
     suspend fun updateMedia(media: MediaEntity) = db.mediaDao().update(media)
     suspend fun deleteMedia(media: MediaEntity) = db.mediaDao().delete(media)
     suspend fun getMedia(projectId: Long): List<MediaEntity> = db.mediaDao().getForProject(projectId)

@@ -58,15 +58,15 @@ class ChecklistDaoTest {
     @Test
     fun buscaPorPrefixoDeCadaPalavraComAceitosPrimeiro() = runBlocking {
         fill()
-        val found = dao.searchScientific("boa", "boa~", "boa% fab%", 8).map { it.taxon.canonicalName }
+        val found = dao.searchScientific("boa", "boa~", "boa% fab%", 8, true, listOf("")).map { it.taxon.canonicalName }
         assertEquals(listOf("Boana faber", "Boana fabra-falsa"), found)
-        assertEquals(listOf("Hyla faber"), dao.searchScientific("hyl", "hyl~", "hyl% fab%", 8).map { it.taxon.canonicalName })
+        assertEquals(listOf("Hyla faber"), dao.searchScientific("hyl", "hyl~", "hyl% fab%", 8, true, listOf("")).map { it.taxon.canonicalName })
     }
 
     @Test
     fun nomePopularLevaAoTaxon() = runBlocking {
         fill()
-        val found = dao.searchVernacular("sapo", "sapo~", "sapo%", 8)
+        val found = dao.searchVernacular("sapo", "sapo~", "sapo%", 8, true, listOf(""))
         assertEquals("Boana faber", found.single().taxon.canonicalName)
         assertEquals("sapo-martelo", found.single().matchedVernacular)
     }
