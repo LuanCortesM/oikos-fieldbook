@@ -3,13 +3,17 @@ package com.oikos.fieldbook.services
 import android.Manifest
 import android.content.Context
 import android.os.Build
+import android.net.wifi.WifiManager
 import android.provider.Settings
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.AdvertisingOptions
+import com.google.android.gms.nearby.connection.BandwidthInfo
 import com.google.android.gms.nearby.connection.ConnectionInfo
 import com.google.android.gms.nearby.connection.ConnectionLifecycleCallback
+import com.google.android.gms.nearby.connection.ConnectionOptions
 import com.google.android.gms.nearby.connection.ConnectionResolution
+import com.google.android.gms.nearby.connection.ConnectionType
 import com.google.android.gms.nearby.connection.ConnectionsStatusCodes
 import com.google.android.gms.nearby.connection.DiscoveredEndpointInfo
 import com.google.android.gms.nearby.connection.DiscoveryOptions
@@ -21,8 +25,10 @@ import com.google.android.gms.nearby.connection.Strategy
 import com.oikos.fieldbook.util.UiLanguage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -30,6 +36,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Envio do pacote de projeto direto para um celular proximo, sem internet e
@@ -41,6 +48,13 @@ import java.security.MessageDigest
  * O pacote vai como STREAM (nao passa pela pasta Downloads nem pede permissao
  * de armazenamento), depois de um cabecalho com tamanho e SHA-256; quem recebe
  * confere os dois e responde se chegou inteiro.
+ *
+ * Velocidade: a conexao comeca pelo Bluetooth (qualidade LOW, ~5 KB/s, ou
+ * MEDIUM, 60-200 KB/s, segundo a referencia do BandwidthInfo) e o Nearby a
+ * troca pelo Wi-Fi (HIGH, 6-60 MB/s) quando consegue. Por isso a conexao e
+ * DISRUPTIVE (o Nearby pode mexer no Wi-Fi e no Bluetooth para ganhar
+ * velocidade) e o pacote grande so sai quando a qualidade chega a HIGH ou
+ * depois de [UPGRADE_WAIT_MILLIS], como a referencia recomenda.
  */
 class NearbyTransfer(context: Context) {
 
@@ -54,7 +68,10 @@ class NearbyTransfer(context: Context) {
         data class Incoming(val endpointId: String, val name: String, val code: String) : State
         /** Quem envia: esperando o outro aceitar, com o codigo para conferir. */
         data class Connecting(val name: String, val code: String) : State
-        data class Transferring(val name: String, val bytes: Long, val total: Long) : State
+        /** Quem envia: conectado, esperando a troca do Bluetooth pelo Wi-Fi antes de mandar o pacote. */
+        data class Upgrading(val name: String) : State
+        /** [quality]: BandwidthInfo.Quality da conexao (UNKNOWN enquanto o Nearby nao informa). */
+        data class Transferring(val name: String, val bytes: Long, val total: Long, val quality: Int = BandwidthInfo.Quality.UNKNOWN) : State
         /** Quem envia: pacote todo enviado, esperando a confirmacao do outro. */
         data class Confirming(val name: String) : State
         data class Sent(val name: String) : State
@@ -82,6 +99,11 @@ class NearbyTransfer(context: Context) {
     private var outgoing: File? = null
     private var outgoingHeader: JSONObject? = null
     private var streamPayloadId: Long? = null
+    private val payloadSent = AtomicBoolean(false)
+    private var upgradeWait: Job? = null
+
+    /** Qualidade atual da conexao (BandwidthInfo.Quality). */
+    @Volatile private var quality = BandwidthInfo.Quality.UNKNOWN
 
     // Quem recebe
     private var incomingHeader: JSONObject? = null
@@ -94,13 +116,17 @@ class NearbyTransfer(context: Context) {
             ?.takeIf { it.isNotBlank() }
             ?: listOf(Build.MANUFACTURER.replaceFirstChar { it.uppercase() }, Build.MODEL).filter { it.isNotBlank() }.distinct().joinToString(" ")
 
+    /** Wi-Fi ligado (nao precisa estar conectado a rede nenhuma): sem ele o envio fica no Bluetooth, lento. */
+    fun wifiEnabled(): Boolean =
+        runCatching { (appContext.getSystemService(Context.WIFI_SERVICE) as WifiManager).isWifiEnabled }.getOrDefault(true)
+
     /** Abre o "Receber": este celular fica visivel para quem for enviar. */
     fun startReceiving() {
         reset()
         role = Role.RECEIVER
         myName = deviceName()
         _state.value = State.Waiting(myName)
-        client.startAdvertising(myName, SERVICE_ID, lifecycle, AdvertisingOptions.Builder().setStrategy(STRATEGY).build())
+        client.startAdvertising(myName, SERVICE_ID, lifecycle, AdvertisingOptions.Builder().setStrategy(STRATEGY).setConnectionType(ConnectionType.DISRUPTIVE).build())
             .addOnFailureListener { fail(it) }
     }
 
@@ -141,7 +167,8 @@ class NearbyTransfer(context: Context) {
     fun connectTo(peer: Peer) {
         peerName = peer.name
         _state.value = State.Connecting(peer.name, "")
-        client.requestConnection(myName, peer.endpointId, lifecycle).addOnFailureListener { fail(it) }
+        val options = ConnectionOptions.Builder().setConnectionType(ConnectionType.DISRUPTIVE).build()
+        client.requestConnection(myName, peer.endpointId, lifecycle, options).addOnFailureListener { fail(it) }
     }
 
     /** Fecha tudo: para de anunciar/procurar e desconecta. O arquivo recebido fica para a importacao. */
@@ -167,6 +194,10 @@ class NearbyTransfer(context: Context) {
         outgoing = null
         outgoingHeader = null
         streamPayloadId = null
+        payloadSent.set(false)
+        upgradeWait?.cancel()
+        upgradeWait = null
+        quality = BandwidthInfo.Quality.UNKNOWN
         incomingHeader = null
         incomingFile = null
         finished = false
@@ -204,16 +235,25 @@ class NearbyTransfer(context: Context) {
                     endpoint = endpointId
                     if (role == Role.SENDER) {
                         runCatching { client.stopDiscovery() }
-                        send(endpointId)
+                        sendWhenFast(endpointId)
                     } else {
                         runCatching { client.stopAdvertising() }
-                        _state.value = State.Transferring(peerName, 0, 0)
+                        _state.value = State.Transferring(peerName, 0, 0, quality)
                     }
                 }
                 ConnectionsStatusCodes.STATUS_CONNECTION_REJECTED ->
                     if (role == Role.SENDER) fail(UiLanguage.t("o outro celular recusou o envio", "the other phone declined the transfer", "el otro celular rechazó el envío"))
                     else _state.value = State.Waiting(myName)
                 else -> fail(UiLanguage.t("não foi possível conectar (${resolution.status.statusCode})", "could not connect (${resolution.status.statusCode})", "no se pudo conectar (${resolution.status.statusCode})"))
+            }
+        }
+
+        override fun onBandwidthChanged(endpointId: String, info: BandwidthInfo) {
+            quality = info.quality
+            when (val current = _state.value) {
+                is State.Transferring -> _state.value = current.copy(quality = quality)
+                is State.Upgrading -> if (quality == BandwidthInfo.Quality.HIGH) send(endpointId)
+                else -> Unit
             }
         }
 
@@ -241,7 +281,7 @@ class NearbyTransfer(context: Context) {
                             reply(endpointId, false, UiLanguage.t("o celular que recebe está sem espaço", "the receiving phone is out of space", "el celular que recibe no tiene espacio"))
                             fail(UiLanguage.t("sem espaço para receber o pacote (${size / (1024 * 1024)} MB)", "not enough space to receive the package (${size / (1024 * 1024)} MB)", "no hay espacio para recibir el paquete (${size / (1024 * 1024)} MB)"))
                         } else {
-                            _state.value = State.Transferring(peerName, 0, size)
+                            _state.value = State.Transferring(peerName, 0, size, quality)
                         }
                     } else if (role == Role.SENDER && json.has("ok")) {
                         finished = true
@@ -261,7 +301,7 @@ class NearbyTransfer(context: Context) {
                     val total = if (role == Role.SENDER) outgoing?.length() ?: update.totalBytes else incomingHeader?.optLong("size") ?: update.totalBytes
                     if (role == Role.SENDER && update.payloadId != streamPayloadId) return
                     if (_state.value is State.Transferring || _state.value is State.Connecting) {
-                        _state.value = State.Transferring(peerName, update.bytesTransferred, total)
+                        _state.value = State.Transferring(peerName, update.bytesTransferred, total, quality)
                     }
                 }
                 PayloadTransferUpdate.Status.SUCCESS ->
@@ -272,13 +312,29 @@ class NearbyTransfer(context: Context) {
         }
     }
 
+    /**
+     * Pacote pequeno sai na hora; o grande espera a conexao rapida (Wi-Fi) por
+     * ate [UPGRADE_WAIT_MILLIS] e depois sai pela conexao que houver.
+     */
+    private fun sendWhenFast(endpointId: String) {
+        val size = outgoing?.length() ?: 0L
+        if (quality == BandwidthInfo.Quality.HIGH || size <= SMALL_PACKAGE_BYTES) return send(endpointId)
+        _state.value = State.Upgrading(peerName)
+        upgradeWait = scope.launch {
+            delay(UPGRADE_WAIT_MILLIS)
+            send(endpointId)
+        }
+    }
+
     private fun send(endpointId: String) {
+        if (!payloadSent.compareAndSet(false, true)) return
+        upgradeWait?.cancel()
         val file = outgoing ?: return fail(UiLanguage.t("pacote não encontrado", "package not found", "paquete no encontrado"))
         val header = outgoingHeader ?: return fail(UiLanguage.t("pacote não encontrado", "package not found", "paquete no encontrado"))
         client.sendPayload(endpointId, Payload.fromBytes(header.toString().toByteArray(Charsets.UTF_8))).addOnFailureListener { fail(it) }
         val stream = Payload.fromStream(FileInputStream(file))
         streamPayloadId = stream.id
-        _state.value = State.Transferring(peerName, 0, file.length())
+        _state.value = State.Transferring(peerName, 0, file.length(), quality)
         client.sendPayload(endpointId, stream).addOnFailureListener { fail(it) }
     }
 
@@ -368,6 +424,12 @@ class NearbyTransfer(context: Context) {
         private const val STALE_MILLIS = 24 * 60 * 60 * 1000L
         private const val FREE_SPACE_MARGIN = 50L * 1024 * 1024
         private val STRATEGY: Strategy = Strategy.P2P_POINT_TO_POINT
+
+        /** Ate este tamanho o pacote sai sem esperar o Wi-Fi (segundos, mesmo pelo Bluetooth). */
+        private const val SMALL_PACKAGE_BYTES = 2L * 1024 * 1024
+
+        /** Quanto o envio espera a conexao rapida antes de seguir pela que houver. */
+        const val UPGRADE_WAIT_MILLIS = 20_000L
 
         /**
          * Permissoes pedidas na hora de usar. A documentacao do Nearby pede

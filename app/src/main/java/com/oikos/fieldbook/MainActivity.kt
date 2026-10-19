@@ -5362,15 +5362,99 @@ private fun KeepScreenOn() {
     }
 }
 
+/**
+ * Barra do envio direto, com a velocidade e o tempo que falta (media dos
+ * ultimos 10 s) e a qualidade da conexao informada pelo Nearby.
+ */
 @Composable
-private fun TransferProgress(bytes: Long, total: Long) {
+private fun TransferProgress(bytes: Long, total: Long, quality: Int) {
+    val samples = remember { mutableStateListOf<Pair<Long, Long>>() }
+    LaunchedEffect(bytes) {
+        val now = System.currentTimeMillis()
+        samples.add(now to bytes)
+        while (samples.size > 2 && samples.first().first < now - 10_000) samples.removeAt(0)
+    }
+    val speed = samples.takeIf { it.size >= 2 }?.let { list ->
+        val (t0, b0) = list.first()
+        val (t1, b1) = list.last()
+        if (t1 - t0 >= 2_000 && b1 > b0) (b1 - b0) * 1000.0 / (t1 - t0) else null
+    }
     if (total > 0) {
         LinearProgressIndicator(progress = { (bytes.toFloat() / total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
         Text("${formatMegabytes(bytes)} ${ui("de")} ${formatMegabytes(total)}", style = MaterialTheme.typography.labelMedium)
     } else {
         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
     }
+    if (speed != null) {
+        val seconds = if (total > bytes) ((total - bytes) / speed).toLong() else 0L
+        Text("${formatSpeed(speed)} · ${remainingTime(seconds)}", style = MaterialTheme.typography.labelMedium)
+    }
+    ConnectionQuality(quality)
     Text(ui("Não feche esta tela até terminar."), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+/** Qualidade da conexao do Nearby, com o que fazer quando ela esta lenta. */
+@Composable
+private fun ConnectionQuality(quality: Int) {
+    val text = when (quality) {
+        com.google.android.gms.nearby.connection.BandwidthInfo.Quality.HIGH ->
+            tr("Conexão rápida (Wi-Fi).", "Fast connection (Wi-Fi).", "Conexión rápida (Wi-Fi).")
+        com.google.android.gms.nearby.connection.BandwidthInfo.Quality.MEDIUM ->
+            tr(
+                "Conexão média. Com o Wi-Fi ligado nos dois celulares, ela costuma ficar rápida sozinha.",
+                "Medium connection. With Wi-Fi on in both phones, it usually speeds up on its own.",
+                "Conexión media. Con el Wi-Fi activado en los dos celulares, suele volverse rápida sola."
+            )
+        com.google.android.gms.nearby.connection.BandwidthInfo.Quality.LOW ->
+            tr(
+                "Conexão lenta. Ligue o Wi-Fi nos dois celulares (não precisa de internet) e deixe um perto do outro.",
+                "Slow connection. Turn on Wi-Fi in both phones (no internet needed) and keep them close together.",
+                "Conexión lenta. Activa el Wi-Fi en los dos celulares (no hace falta internet) y mantenlos cerca."
+            )
+        else -> return
+    }
+    val fast = quality == com.google.android.gms.nearby.connection.BandwidthInfo.Quality.HIGH
+    Text(text, style = MaterialTheme.typography.labelMedium, color = if (fast) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+/** Aviso enquanto o Wi-Fi deste celular estiver desligado: sem ele o envio direto fica no Bluetooth, lento. */
+@Composable
+private fun WifiHint(viewModel: AppViewModel) {
+    var wifiOn by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            wifiOn = viewModel.nearby.wifiEnabled()
+            kotlinx.coroutines.delay(2_000)
+        }
+    }
+    if (!wifiOn) {
+        Text(
+            tr(
+                "O Wi-Fi deste celular está desligado. Ligue o Wi-Fi nos dois celulares (não precisa de internet): o envio fica muito mais rápido.",
+                "This phone's Wi-Fi is off. Turn on Wi-Fi in both phones (no internet needed): the transfer gets much faster.",
+                "El Wi-Fi de este celular está apagado. Activa el Wi-Fi en los dos celulares (no hace falta internet): el envío es mucho más rápido."
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error
+        )
+    }
+}
+
+/** "1,2 MB/s" ou "180 KB/s", no formato de numero do idioma do app. */
+private fun formatSpeed(bytesPerSecond: Double): String {
+    val locale = com.oikos.fieldbook.util.UiLanguage.current.locale
+    return if (bytesPerSecond >= 1024 * 1024) String.format(locale, "%.1f MB/s", bytesPerSecond / (1024.0 * 1024.0))
+    else String.format(locale, "%.0f KB/s", bytesPerSecond / 1024.0)
+}
+
+@Composable
+private fun remainingTime(seconds: Long): String {
+    if (seconds < 60) return tr("falta menos de 1 min", "less than 1 min left", "falta menos de 1 min")
+    val minutes = (seconds + 59) / 60
+    if (minutes < 90) return tr("faltam cerca de $minutes min", "about $minutes min left", "faltan unos $minutes min")
+    val hours = minutes / 60
+    val rest = minutes % 60
+    return tr("faltam cerca de $hours h $rest min", "about $hours h $rest min left", "faltan unas $hours h $rest min")
 }
 
 /** "3,4 MB" no app em portugues ou espanhol e "3.4 MB" em ingles, seja qual for o idioma do aparelho. */
@@ -5405,6 +5489,7 @@ private fun NearbySendDialog(viewModel: AppViewModel, projectId: Long, sessionId
                 when (val current = state) {
                     is com.oikos.fieldbook.services.NearbyTransfer.State.Searching -> {
                         Text(ui("No outro celular, toque em Importar na tela inicial e escolha Importar de outro celular. Não precisa de internet."))
+                        WifiHint(viewModel)
                         if (current.peers.isEmpty()) {
                             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                             Text(ui("Procurando celulares..."), style = MaterialTheme.typography.labelMedium)
@@ -5422,9 +5507,21 @@ private fun NearbySendDialog(viewModel: AppViewModel, projectId: Long, sessionId
                         TransferCode(current.code)
                         Text(ui("Confira se o mesmo código aparece no outro celular e peça para tocar em Aceitar."))
                     }
+                    is com.oikos.fieldbook.services.NearbyTransfer.State.Upgrading -> {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Text(
+                            "${tr("Conectado a", "Connected to", "Conectado a")} ${current.name}. " +
+                                tr(
+                                    "Preparando a conexão rápida por Wi-Fi; o envio começa em instantes.",
+                                    "Setting up the fast Wi-Fi connection; the transfer starts in a moment.",
+                                    "Preparando la conexión rápida por Wi-Fi; el envío empieza en un momento."
+                                )
+                        )
+                        WifiHint(viewModel)
+                    }
                     is com.oikos.fieldbook.services.NearbyTransfer.State.Transferring -> {
                         Text("${ui("Enviando para")} ${current.name}")
-                        TransferProgress(current.bytes, current.total)
+                        TransferProgress(current.bytes, current.total, current.quality)
                     }
                     is com.oikos.fieldbook.services.NearbyTransfer.State.Confirming -> {
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -5473,6 +5570,7 @@ private fun NearbyReceiveDialog(viewModel: AppViewModel, onReceived: (File) -> U
                     is com.oikos.fieldbook.services.NearbyTransfer.State.Waiting -> {
                         Text(ui("No outro celular, abra o projeto, toque em Exportar, depois em Enviar para outro celular e escolha Para o celular ao lado. Não precisa de internet."))
                         Text("${ui("Este celular aparece como")}: ${current.myName}", style = MaterialTheme.typography.titleSmall)
+                        WifiHint(viewModel)
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                         Text(ui("Aguardando..."), style = MaterialTheme.typography.labelMedium)
                     }
@@ -5483,7 +5581,7 @@ private fun NearbyReceiveDialog(viewModel: AppViewModel, onReceived: (File) -> U
                     }
                     is com.oikos.fieldbook.services.NearbyTransfer.State.Transferring -> {
                         Text("${ui("Recebendo de")} ${current.name}")
-                        TransferProgress(current.bytes, current.total)
+                        TransferProgress(current.bytes, current.total, current.quality)
                     }
                     is com.oikos.fieldbook.services.NearbyTransfer.State.Failed ->
                         Text("${ui("Não foi possível receber")}: ${current.message}")

@@ -143,6 +143,10 @@ class ProjectTransfer(private val database: OikosDatabase, private val filesDir:
             zip.putNextEntry(ZipEntry(DATA_ENTRY))
             zip.write(document.toString().toByteArray(Charsets.UTF_8))
             zip.closeEntry()
+            // Nas midias o nivel mais rapido da quase o mesmo tamanho do padrao
+            // (WAV de campo: 70,1% contra 70,0% do original) e comprime o audio
+            // cerca de 2,5 vezes mais depressa (medido em 19/10/2026).
+            zip.setLevel(java.util.zip.Deflater.BEST_SPEED)
             files.forEach { (relative, file) ->
                 zip.putNextEntry(ZipEntry("files/$relative"))
                 file.inputStream().use { it.copyTo(zip) }
