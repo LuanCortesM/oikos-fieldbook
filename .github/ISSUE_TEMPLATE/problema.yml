@@ -1,0 +1,26 @@
+name: Relatar problema
+description: Algo no app não funcionou como deveria.
+labels: [bug]
+body:
+  - type: textarea
+    id: aconteceu
+    attributes:
+      label: O que aconteceu
+      description: Conte o que você fez e o que apareceu na tela. Se puder, junte uma captura de tela.
+    validations:
+      required: true
+  - type: textarea
+    id: esperado
+    attributes:
+      label: O que você esperava que acontecesse
+  - type: input
+    id: versao
+    attributes:
+      label: Versão do app
+      description: Aparece na tela Sobre, logo abaixo do nome.
+      placeholder: "0.2.1 (build 11)"
+  - type: input
+    id: aparelho
+    attributes:
+      label: Celular e versão do Android
+      placeholder: "Moto G84, Android 14"

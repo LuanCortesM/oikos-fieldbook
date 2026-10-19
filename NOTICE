@@ -1,0 +1,25 @@
+Oikos FieldBook
+Copyright 2026 Luan da Silva Cortes Maciel
+
+The source code is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The Oikos FieldBook name, the logo and the app's drawings are not licensed
+under the Apache License and remain all rights reserved by the author. The
+"License" section of README.md lists the files.
+
+Data bundled in app/src/main/assets, each under its own terms:
+
+- municipios.bin: adapted from IBGE, Malha Municipal 2022 (CC BY 4.0).
+- listas/flora_brasil.zip: adapted from Flora e Funga do Brasil, Instituto de
+  Pesquisas Jardim Botânico do Rio de Janeiro (CC BY 4.0). The original
+  eml.xml is kept inside the file.
+- listas/fauna_brasil.zip: adapted from Catálogo Taxonômico da Fauna do
+  Brasil (CC BY 4.0). The original eml.xml is kept inside the file.
+- geoide_egm2008.bin: derived from the EGM2008 geoid model of the U.S.
+  National Geospatial-Intelligence Agency (NGA), through the 5-minute grid
+  distributed by GeographicLib.
+- licencas/google_play_services.txt: third-party notices shipped inside the
+  Google Play services libraries.
+
+Map tiles are loaded at runtime from OpenStreetMap
+(© OpenStreetMap contributors, https://www.openstreetmap.org/copyright).

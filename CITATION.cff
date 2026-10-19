@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "Se usar o Oikos FieldBook no seu trabalho, cite-o como abaixo."
+type: software
+title: "Oikos FieldBook"
+abstract: >-
+  Caderno de campo digital para biodiversidade, para Android. Registra
+  expedições, ocorrências, coordenadas, trilhas GPS, fotos e áudios sem
+  internet e exporta os dados em Darwin Core.
+authors:
+  - family-names: "Maciel"
+    given-names: "Luan da Silva Cortes"
+version: "0.2.1"
+date-released: "2026-10-18"
+doi: "10.5281/zenodo.20526746"
+repository-code: "https://github.com/LuanCortesM/oikos-fieldbook"
+url: "https://play.google.com/store/apps/details?id=com.oikos.fieldbook"
+license: Apache-2.0
+keywords:
+  - biodiversity
+  - Darwin Core
+  - field notebook
+  - fieldwork
+  - GBIF
+  - Android

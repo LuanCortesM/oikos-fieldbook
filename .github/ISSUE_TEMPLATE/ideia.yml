@@ -1,0 +1,15 @@
+name: Sugerir ideia
+description: Uma função nova ou uma mudança no que já existe.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: situacao
+    attributes:
+      label: Que situação de campo isso resolve
+      description: Conte como você trabalha hoje e onde o app atrapalha ou deixa a desejar.
+    validations:
+      required: true
+  - type: textarea
+    id: ideia
+    attributes:
+      label: Como você imagina que funcionaria
