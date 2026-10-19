@@ -44,6 +44,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -385,6 +390,9 @@ private const val LAUNCH_WALK_MS = 3_000L
 /** Distancia entre o pe do logo e o topo do contorno do Itaguare na abertura. */
 private val LAUNCH_BAR_GAP = 60.dp
 
+/** Altura do logo na abertura: -1 no topo, 0 no centro; -0,42 deixa o logo perto de 1/3 da tela. */
+private const val LAUNCH_LOGO_BIAS = -0.42f
+
 @Composable
 private fun OikosLaunchScreen(barRunning: Boolean) {
     Box(
@@ -393,11 +401,12 @@ private fun OikosLaunchScreen(barRunning: Boolean) {
             .background(Color(0xFF0B0B0D)),
         contentAlignment = Alignment.Center
     ) {
-        // Logo no mesmo lugar e tamanho de antes (centro; 84% da largura, ate
-        // 210 dp de altura). O contorno do Itaguare fica abaixo dele, com o
-        // trilheiro andando por ele, sem empurrar o logo para cima.
+        // Logo do mesmo tamanho (84% da largura), um pouco acima do centro
+        // (por volta de 1/3 da altura), para o credito caber embaixo. O
+        // contorno do Itaguare fica abaixo dele, com o trilheiro andando por ele.
         Box(
             modifier = Modifier
+                .align(androidx.compose.ui.BiasAlignment(0f, LAUNCH_LOGO_BIAS))
                 .fillMaxWidth(0.84f)
                 .widthIn(max = 485.dp),
             contentAlignment = Alignment.BottomCenter
@@ -423,6 +432,59 @@ private fun OikosLaunchScreen(barRunning: Boolean) {
                     },
                 hikerHeight = 11.25.dp
             )
+        }
+        // Deitado (pouca altura) o credito cairia em cima do contorno: so em pe.
+        val tallEnough = LocalConfiguration.current.screenHeightDp >= 560
+        if (tallEnough) {
+            LaunchCredit(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 30.dp)
+            )
+        }
+    }
+}
+
+/**
+ * Credito da abertura, no estilo do "— FIELD BOOK —" do logo: o projeto em
+ * laranja e, embaixo, a autoria entre dois tracos do mesmo tamanho da linha de
+ * cima. Em tela estreita a letra e o espacamento diminuem antes de cortar.
+ */
+@Composable
+private fun LaunchCredit(modifier: Modifier = Modifier) {
+    // O laranja das letras "FIELD BOOK" do logo (medido no PNG): sem azul, para nao ficar opaco ao lado dele.
+    val orange = Color(0xFFFB8C00)
+    val project = "PROJETO HERPETO MANTIQUEIRA"
+    BoxWithConstraints(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+        val available = constraints.maxWidth * 0.66f
+        val sizes = listOf(11.5f to 0.3f, 11f to 0.26f, 10.5f to 0.22f, 10f to 0.16f)
+        val (size, spacing) = sizes.firstOrNull { (fontSize, letterSpacing) ->
+            val style = androidx.compose.ui.text.TextStyle(fontSize = fontSize.sp, letterSpacing = letterSpacing.em, fontWeight = FontWeight.SemiBold)
+            measurer.measure(project, style, maxLines = 1, softWrap = false).size.width <= available
+        } ?: sizes.last()
+        Column(
+            Modifier.width(IntrinsicSize.Max),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            // Altura de linha justa: a padrao do tema (24 sp) separava demais as duas linhas.
+            Text(project, color = orange, fontSize = size.sp, lineHeight = (size * 1.2f).sp, letterSpacing = spacing.em, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f).height(1.5.dp).background(orange))
+                Text(
+                    "DEVELOPED BY MACIEL, L. S. C.",
+                    color = Color(0xFFE6E6E6),
+                    fontSize = (size * 0.72f).sp,
+                    lineHeight = (size * 0.72f * 1.2f).sp,
+                    letterSpacing = (spacing + 0.12f).em,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.padding(horizontal = 10.dp)
+                )
+                Box(Modifier.weight(1f).height(1.5.dp).background(orange))
+            }
         }
     }
 }
