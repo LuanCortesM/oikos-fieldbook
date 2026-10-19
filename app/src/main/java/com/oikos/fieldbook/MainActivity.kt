@@ -5321,25 +5321,33 @@ private fun transferDate(millis: Long): String =
     if (millis <= 0L) "?" else Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"))
 
 /**
- * Pede as permissoes do envio direto (dispositivos proximos; localizacao ate o
- * Android 12) e so entao segue. Sem elas o Nearby recusa anunciar ou procurar.
+ * Pede as permissoes do envio direto (dispositivos proximos e localizacao
+ * precisa) e so entao segue. Sem elas o Nearby recusa anunciar ou procurar.
  */
 @Composable
 private fun rememberNearbyPermissions(viewModel: AppViewModel, onGranted: () -> Unit): () -> Unit {
     val context = LocalContext.current
     val currentOnGranted by rememberUpdatedState(onGranted)
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
-        if (result.values.all { it }) currentOnGranted()
+    fun granted(permission: String) =
+        androidx.core.content.ContextCompat.checkSelfPermission(context, permission) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        // Confere o estado real: quem escolhe "aproximada" fica sem a precisa.
+        if (com.oikos.fieldbook.services.NearbyTransfer.requiredPermissions().all(::granted)) currentOnGranted()
         else viewModel.showMessage(
             com.oikos.fieldbook.util.UiLanguage.t(
-                "Sem a permissão de dispositivos próximos o envio direto não funciona. Você ainda pode usar o pacote por WhatsApp, Drive ou cabo.",
-                "Without the nearby devices permission, direct transfer does not work. You can still use the package via WhatsApp, Drive or cable.", "Sin el permiso de dispositivos cercanos el envío directo no funciona. Aún puedes usar el paquete por WhatsApp, Drive o cable."
+                "O envio direto precisa das permissões de dispositivos próximos e de localização precisa (o Oikos não registra a localização nesse uso). Libere em Configurações do Android > Apps > Oikos FieldBook > Permissões, ou mande o pacote por WhatsApp, Drive ou cabo.",
+                "Direct transfer needs the nearby devices and precise location permissions (Oikos does not record your location for this). Allow them in Android Settings > Apps > Oikos FieldBook > Permissions, or send the package via WhatsApp, Drive or cable.",
+                "El envío directo necesita los permisos de dispositivos cercanos y de ubicación precisa (Oikos no registra tu ubicación para esto). Actívalos en Ajustes de Android > Aplicaciones > Oikos FieldBook > Permisos, o envía el paquete por WhatsApp, Drive o cable."
             )
         )
     }
     return {
-        val missing = com.oikos.fieldbook.services.NearbyTransfer.requiredPermissions()
-            .filter { androidx.core.content.ContextCompat.checkSelfPermission(context, it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
+        val required = com.oikos.fieldbook.services.NearbyTransfer.requiredPermissions()
+        var missing = required.filterNot(::granted)
+        // A precisa so e pedida junto com a aproximada (Android 12+), mesmo que esta ja esteja dada.
+        if (android.Manifest.permission.ACCESS_FINE_LOCATION in missing) {
+            missing = (missing + android.Manifest.permission.ACCESS_COARSE_LOCATION).distinct()
+        }
         if (missing.isEmpty()) currentOnGranted() else launcher.launch(missing.toTypedArray())
     }
 }

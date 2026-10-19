@@ -59,8 +59,8 @@ ficam sob as regras do serviço ou do aparelho que os recebeu.
 ## Permissões
 
 - **Localização (precisa e aproximada)**: registrar a coordenada da ocorrência
-  e os pontos da trilha. Usada só quando você captura uma localização ou mantém
-  uma trilha ativa.
+  e os pontos da trilha. Usada só quando você captura uma localização, mantém
+  uma trilha ativa ou procura o celular ao lado no envio direto.
 - **Localização em primeiro plano, notificações e manter o aparelho ativo**:
   continuar gravando a trilha com a tela apagada. Enquanto isso, o Android
   mostra um aviso fixo na barra de notificações.
@@ -68,8 +68,8 @@ ficam sob as regras do serviço ou do aparelho que os recebeu.
 - **Microfone**: gravar áudio (vocalizações, observação narrada).
 - **Dispositivos por perto, Bluetooth e Wi-Fi**: encontrar o celular ao lado e
   enviar ou receber um pacote direto, sem internet. Usadas só enquanto a tela
-  de enviar ou de receber está aberta. No Android 11 e anteriores, o sistema
-  exige a permissão de localização para procurar aparelhos por Bluetooth; nesse
+  de enviar ou de receber está aberta. Para procurar o celular ao lado, o
+  Google Play services também exige a permissão de localização precisa; nesse
   uso o Oikos não registra a localização.
 - **Internet e estado da rede**: os usos descritos em "Uso de internet".
 

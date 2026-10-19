@@ -336,10 +336,12 @@ class NearbyTransfer(context: Context) {
         val code = (error as? ApiException)?.statusCode
         fail(
             when (code) {
-                ConnectionsStatusCodes.MISSING_PERMISSION_BLUETOOTH, ConnectionsStatusCodes.MISSING_PERMISSION_BLUETOOTH_ADMIN,
-                ConnectionsStatusCodes.MISSING_PERMISSION_ACCESS_WIFI_STATE, ConnectionsStatusCodes.MISSING_PERMISSION_CHANGE_WIFI_STATE,
-                ConnectionsStatusCodes.MISSING_PERMISSION_ACCESS_COARSE_LOCATION ->
-                    UiLanguage.t("falta permissão de dispositivos próximos ou de localização ($code)", "the nearby devices or location permission is missing ($code)", "falta el permiso de dispositivos cercanos o de ubicación ($code)")
+                in MISSING_PERMISSION_CODES ->
+                    UiLanguage.t(
+                        "falta a permissão de dispositivos próximos ou de localização precisa ($code). Libere em Configurações do Android > Apps > Oikos FieldBook > Permissões.",
+                        "the nearby devices or precise location permission is missing ($code). Allow it in Android Settings > Apps > Oikos FieldBook > Permissions.",
+                        "falta el permiso de dispositivos cercanos o de ubicación precisa ($code). Actívalo en Ajustes de Android > Aplicaciones > Oikos FieldBook > Permisos."
+                    )
                 ConnectionsStatusCodes.STATUS_BLUETOOTH_ERROR, ConnectionsStatusCodes.STATUS_RADIO_ERROR ->
                     UiLanguage.t("ligue o Bluetooth e o Wi-Fi (não precisa de internet) e tente de novo", "turn on Bluetooth and Wi-Fi (no internet needed) and try again", "activa el Bluetooth y el Wi-Fi (no hace falta internet) e inténtalo de nuevo")
                 ConnectionsStatusCodes.STATUS_ENDPOINT_UNKNOWN ->
@@ -367,16 +369,38 @@ class NearbyTransfer(context: Context) {
         private const val FREE_SPACE_MARGIN = 50L * 1024 * 1024
         private val STRATEGY: Strategy = Strategy.P2P_POINT_TO_POINT
 
-        /** Permissoes pedidas na hora de usar, conforme a versao do Android (documentacao do Nearby). */
+        /**
+         * Permissoes pedidas na hora de usar. A documentacao do Nearby pede
+         * localizacao so ate o Android 12, mas na pratica (Play services, Nearby
+         * 19.3, app que declara localizacao por causa do GPS) ele recusa com 8034
+         * sem a aproximada e com 8036 sem a precisa, tambem no Android 16
+         * (conferido no emulador em 19/10/2026). Do Android 12 em diante a precisa
+         * so e pedida junto com a aproximada.
+         */
         fun requiredPermissions(): Array<String> = buildList {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 add(Manifest.permission.BLUETOOTH_SCAN)
                 add(Manifest.permission.BLUETOOTH_ADVERTISE)
                 add(Manifest.permission.BLUETOOTH_CONNECT)
             }
-            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S) add(Manifest.permission.ACCESS_FINE_LOCATION)
+            add(Manifest.permission.ACCESS_FINE_LOCATION)
+            add(Manifest.permission.ACCESS_COARSE_LOCATION)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.NEARBY_WIFI_DEVICES)
         }.toTypedArray()
+
+        /** Codigos com que o Nearby recusa por falta de permissao. */
+        val MISSING_PERMISSION_CODES = setOf(
+            ConnectionsStatusCodes.MISSING_PERMISSION_NEARBY_WIFI_DEVICES,
+            ConnectionsStatusCodes.MISSING_PERMISSION_BLUETOOTH,
+            ConnectionsStatusCodes.MISSING_PERMISSION_BLUETOOTH_ADMIN,
+            ConnectionsStatusCodes.MISSING_PERMISSION_ACCESS_WIFI_STATE,
+            ConnectionsStatusCodes.MISSING_PERMISSION_CHANGE_WIFI_STATE,
+            ConnectionsStatusCodes.MISSING_PERMISSION_ACCESS_COARSE_LOCATION,
+            ConnectionsStatusCodes.MISSING_PERMISSION_ACCESS_FINE_LOCATION,
+            ConnectionsStatusCodes.MISSING_PERMISSION_BLUETOOTH_SCAN,
+            ConnectionsStatusCodes.MISSING_PERMISSION_BLUETOOTH_ADVERTISE,
+            ConnectionsStatusCodes.MISSING_PERMISSION_BLUETOOTH_CONNECT
+        )
 
         fun sha256(file: File): String {
             val digest = MessageDigest.getInstance("SHA-256")
