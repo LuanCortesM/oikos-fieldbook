@@ -3109,7 +3109,13 @@ private suspend fun resolveSuggestion(viewModel: AppViewModel, suggestion: Taxon
             scientificName = fullName(suggestion.taxon),
             fields = taxonFields(suggestion.taxon, "${suggestion.checklistTitle} (v${suggestion.checklistVersion})") + ("verbatimIdentification" to ""),
             vernacular = viewModel.vernacularFor(suggestion.taxon),
-            synonymNotice = "${suggestion.taxon.canonicalName} é sinônimo de ${suggestion.taxon.acceptedName.ifBlank { "outro nome" }} segundo a lista, mas o nome aceito não está nela. Registrado como ${suggestion.taxon.canonicalName}: confira a identificação."
+            synonymNotice = suggestion.taxon.let { taxon ->
+                UiLanguage.t(
+                    "${taxon.canonicalName} é sinônimo de ${taxon.acceptedName.ifBlank { "outro nome" }} segundo a lista, mas o nome aceito não está nela. Registrado como ${taxon.canonicalName}: confira a identificação.",
+                    "${taxon.canonicalName} is a synonym of ${taxon.acceptedName.ifBlank { "another name" }} in the list, but the accepted name is not in it. Recorded as ${taxon.canonicalName}: check the identification.",
+                    "${taxon.canonicalName} es sinónimo de ${taxon.acceptedName.ifBlank { "otro nombre" }} según la lista, pero el nombre aceptado no está en ella. Registrado como ${taxon.canonicalName}: revisa la identificación."
+                )
+            }
         )
     }
     val accepted = found
@@ -3119,7 +3125,13 @@ private suspend fun resolveSuggestion(viewModel: AppViewModel, suggestion: Taxon
         fields = taxonFields(accepted, "${suggestion.checklistTitle} (v${suggestion.checklistVersion})") +
             ("verbatimIdentification" to if (synonym) fullName(suggestion.taxon) else ""),
         vernacular = viewModel.vernacularFor(accepted),
-        synonymNotice = if (synonym) "${suggestion.taxon.canonicalName} é sinônimo: registrado como ${accepted.canonicalName}." else null
+        synonymNotice = if (synonym) {
+            UiLanguage.t(
+                "${suggestion.taxon.canonicalName} é sinônimo: registrado como ${accepted.canonicalName}.",
+                "${suggestion.taxon.canonicalName} is a synonym: recorded as ${accepted.canonicalName}.",
+                "${suggestion.taxon.canonicalName} es sinónimo: registrado como ${accepted.canonicalName}."
+            )
+        } else null
     )
 }
 

@@ -304,6 +304,64 @@ class OikosExporterTest {
         assertTrue(archive("es").getValue("eml.xml").contains("<language>spa</language>"))
     }
 
+    /**
+     * Trocar o idioma do app (Configuracoes > Idioma) nao pode mudar os dados
+     * exportados: o mesmo projeto sai byte a byte igual com a tela em
+     * portugues, ingles ou espanhol, inclusive os avisos gravados no
+     * manifest.json e na aba de resumo. So o horario da exportacao muda.
+     */
+    @Test
+    fun idiomaDaTelaNaoMudaNadaDoQueEExportado() {
+        val records = listOf(
+            occurrence(1) { copy(latitude = -22.5, longitude = -45.0, sex = "female", basisOfRecord = "PreservedSpecimen") },
+            // Sem coordenada propria: gera aviso (herda o ponto da expedicao).
+            occurrence(2) { copy(occurrenceId = "", lifeStage = "tadpole") }
+        )
+        listOf("pt", "en", "es").forEach { projectLanguage ->
+            // Sem licenca: mais um aviso, que vai para o manifest.json.
+            val exportProject = project.copy(language = projectLanguage, license = "")
+            val byScreen = AppLanguageScreens.map { screen ->
+                com.oikos.fieldbook.util.UiLanguage.testOverride = screen
+                try {
+                    val file = OikosExporter("9.9.9").export(
+                        format = ExportFormat.Zip, project = exportProject, sessions = listOf(session),
+                        occurrences = records, media = emptyList(), fields = emptyList()
+                    ) { name -> File(folder.root, "tela_${screen}_${projectLanguage}_$name") }.file
+                    screen to readZipDeep(file.readBytes()).mapValues { (_, text) -> text.replace(EXPORT_TIME, "<hora>") }
+                } finally {
+                    com.oikos.fieldbook.util.UiLanguage.testOverride = null
+                }
+            }
+            val (_, reference) = byScreen.first()
+            assertTrue(reference.keys.toString(), reference.keys.any { it.endsWith("manifest.json") })
+            assertTrue(reference.keys.toString(), reference.keys.any { it.contains(".xlsx!") })
+            byScreen.drop(1).forEach { (screen, files) ->
+                assertEquals("projeto $projectLanguage, tela $screen", reference.keys, files.keys)
+                reference.forEach { (name, text) -> assertEquals("projeto $projectLanguage, tela $screen: $name", text, files[name]) }
+            }
+        }
+    }
+
+    private val AppLanguageScreens = com.oikos.fieldbook.util.AppLanguage.entries.toList()
+    private val EXPORT_TIME = Regex("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?")
+
+    /** Todas as entradas do ZIP, abrindo tambem os .zip e .xlsx de dentro ("dwca.zip!meta.xml"). */
+    private fun readZipDeep(bytes: ByteArray, prefix: String = ""): Map<String, String> {
+        val result = mutableMapOf<String, String>()
+        ZipInputStream(bytes.inputStream()).use { zip ->
+            while (true) {
+                val entry = zip.nextEntry ?: break
+                val content = zip.readBytes()
+                if (entry.name.endsWith(".zip") || entry.name.endsWith(".xlsx")) {
+                    result += readZipDeep(content, "$prefix${entry.name}!")
+                } else {
+                    result["$prefix${entry.name}"] = content.toString(Charsets.UTF_8)
+                }
+            }
+        }
+        return result
+    }
+
     private fun readZip(file: File): Map<String, String> {
         val result = mutableMapOf<String, String>()
         ZipInputStream(file.inputStream()).use { zip ->

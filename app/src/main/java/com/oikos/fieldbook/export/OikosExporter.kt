@@ -344,7 +344,7 @@ private class ExportPackage(
                         listOf("exportedAt", exportedAt()),
                         listOf("photos", mediaLinks.count { it.type == "photo" }.toString()),
                         listOf("audios", mediaLinks.count { it.type == "audio" }.toString()),
-                        listOf("warnings", validationWarnings()),
+                        listOf("warnings", validationWarnings(language = language)),
                         listOf(say("comoCitarOApp", "howToCiteTheApp", "comoCitarLaApp"), AppCitation.apa(appVersion))
                     )
                 )
@@ -392,7 +392,7 @@ private class ExportPackage(
                     }
                 ),
                 listOf("geodeticDatum", project.defaultDatum),
-                listOf("warnings", validationWarnings()),
+                listOf("warnings", validationWarnings(language = language)),
                 listOf(say("comoCitarOApp", "howToCiteTheApp", "comoCitarLaApp"), AppCitation.apa(appVersion))
             )
         )
@@ -583,20 +583,29 @@ private class ExportPackage(
         )
     }
 
-    fun validationWarnings(format: ExportFormat? = null): String {
+    /**
+     * Avisos da exportacao. Na tela, no idioma da tela; dentro dos arquivos
+     * (manifest.json, aba de resumo), no idioma do projeto, para o mesmo
+     * projeto sair igual qualquer que seja o idioma do app.
+     */
+    fun validationWarnings(format: ExportFormat? = null, language: AppLanguage = UiLanguage.current): String {
+        fun t(pt: String, en: String, es: String) = when (language) {
+            AppLanguage.PT -> pt
+            AppLanguage.EN -> en
+            AppLanguage.ES -> es
+        }
         val warnings = mutableListOf<String>()
         if (format == ExportFormat.DwcArchive || format == ExportFormat.Zip) {
             if (project.license.isBlank()) {
-                warnings += UiLanguage.t("Licença do conjunto não definida: o GBIF exige CC0, CC BY ou CC BY-NC (defina em Editar projeto).", "Dataset license not set: GBIF requires CC0, CC BY or CC BY-NC (set it in Edit project).", "Licencia del conjunto no definida: GBIF exige CC0, CC BY o CC BY-NC (defínela en Editar proyecto).")
+                warnings += t("Licença do conjunto não definida: o GBIF exige CC0, CC BY ou CC BY-NC (defina em Editar projeto).", "Dataset license not set: GBIF requires CC0, CC BY or CC BY-NC (set it in Edit project).", "Licencia del conjunto no definida: GBIF exige CC0, CC BY o CC BY-NC (defínela en Editar proyecto).")
             }
             if (project.mediaBaseUrl.isBlank() && mediaLinks.any { it.occurrenceID.isNotBlank() }) {
-                warnings += UiLanguage.t("Mídias fora do Darwin Core Archive: o padrão exige URL pública. Informe a URL das mídias em Editar projeto.", "Media left out of the Darwin Core Archive: the standard requires a public URL. Enter the media URL in Edit project.", "Archivos multimedia fuera del Darwin Core Archive: el estándar exige una URL pública. Indica la URL de los archivos multimedia en Editar proyecto.")
+                warnings += t("Mídias fora do Darwin Core Archive: o padrão exige URL pública. Informe a URL das mídias em Editar projeto.", "Media left out of the Darwin Core Archive: the standard requires a public URL. Enter the media URL in Edit project.", "Archivos multimedia fuera del Darwin Core Archive: el estándar exige una URL pública. Indica la URL de los archivos multimedia en Editar proyecto.")
             }
         }
-        // Aviso aparece na tela depois de exportar: segue o idioma do app.
         fun plural(n: Int, ptOne: String, ptMany: String, enOne: String, enMany: String, esOne: String, esMany: String) =
-            UiLanguage.t(if (n == 1) ptOne else ptMany, if (n == 1) enOne else enMany, if (n == 1) esOne else esMany)
-        if (occurrences.isEmpty()) warnings += UiLanguage.t("Nenhuma ocorrência encontrada para exportar.", "No occurrences found to export.", "No se encontraron registros para exportar.")
+            t(if (n == 1) ptOne else ptMany, if (n == 1) enOne else enMany, if (n == 1) esOne else esMany)
+        if (occurrences.isEmpty()) warnings += t("Nenhuma ocorrência encontrada para exportar.", "No occurrences found to export.", "No se encontraron registros para exportar.")
         val withoutId = occurrences.count { it.occurrenceId.isBlank() }
         if (withoutId > 0) warnings += plural(
             withoutId,
@@ -705,7 +714,7 @@ private class ExportPackage(
             .put("files", JSONArray(files))
             .put("mediaLinks", JSONArray(mediaLinks.map { JSONObject(it.manifestMap()) }))
             .put("gpsTracks", JSONArray(tracks.map { JSONObject(trackMap(it)) }))
-            .put("warnings", JSONArray(validationWarnings(ExportFormat.Zip).lines().filter { it.isNotBlank() }))
+            .put("warnings", JSONArray(validationWarnings(ExportFormat.Zip, language).lines().filter { it.isNotBlank() }))
             .toString(2)
     }
 

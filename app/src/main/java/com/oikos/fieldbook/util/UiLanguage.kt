@@ -53,8 +53,13 @@ object UiLanguage {
         app = context.applicationContext
     }
 
+    /** So para testes: simula o idioma escolhido na tela. */
+    @Volatile
+    internal var testOverride: AppLanguage? = null
+
     val current: AppLanguage
         get() {
+            testOverride?.let { return it }
             val context = app ?: return AppLanguage.PT
             val preference = context.getSharedPreferences("oikos_app_settings", Context.MODE_PRIVATE).getString("app_language", "auto")
             return AppLanguage.resolve(preference, context.resources.configuration.locales[0].language)
