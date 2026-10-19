@@ -712,5 +712,7 @@ internal val spanishText: Map<String, String> = mapOf(
     "Qual é a dúvida?" to "¿Cuál es tu duda?",
     "Abre o seu app de e-mail com a mensagem pronta para você conferir e enviar. Junto vão a versão do app e do Android e o modelo do aparelho, para ajudar a achar o problema." to "Abre tu app de correo con el mensaje listo para que lo revises y lo envíes. También van la versión de la app y de Android y el modelo del dispositivo, para ayudar a encontrar el problema.",
     "Abrir e-mail" to "Abrir correo",
-    "Nenhum app de e-mail encontrado. A mensagem foi copiada: cole num e-mail para herpetomantiqueira@gmail.com." to "No se encontró ninguna app de correo. El mensaje se copió: pégalo en un correo a herpetomantiqueira@gmail.com."
+    "Nenhum app de e-mail encontrado. A mensagem foi copiada: cole num e-mail para herpetomantiqueira@gmail.com." to "No se encontró ninguna app de correo. El mensaje se copió: pégalo en un correo a herpetomantiqueira@gmail.com.",
+    "Política de privacidade" to "Política de privacidad",
+    "Nenhum navegador encontrado. O endereço foi copiado." to "No se encontró ningún navegador. La dirección se copió."
 )

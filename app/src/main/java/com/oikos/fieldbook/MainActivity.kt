@@ -80,6 +80,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Feedback
+import androidx.compose.material.icons.filled.Policy
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.PhoneAndroid
@@ -5837,6 +5838,7 @@ private fun AboutScreen(modifier: Modifier, onBack: () -> Unit) {
             item { FeedbackCard() }
             item { HowToCiteCard() }
             item { OpenSourceLicensesCard() }
+            item { PrivacyPolicyButton() }
             item {
             DeveloperSignature(Modifier.fillMaxWidth().padding(top = 20.dp))
             }
@@ -6109,6 +6111,42 @@ private fun NetworkPrivacyCard() {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        PrivacyPolicyButton()
+    }
+}
+
+/** Endereco publico da Politica de Privacidade, o mesmo informado no Play Console. */
+private const val PRIVACY_POLICY_URL = "https://luancortesm.github.io/oikos-fieldbook/privacidade/"
+
+/**
+ * Abre a Politica de Privacidade no navegador. O Google pede o link dentro do
+ * app, alem do informado no Play. Sem navegador, o endereco e copiado.
+ */
+@Composable
+private fun PrivacyPolicyButton(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        OutlinedButton(onClick = {
+            try {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_POLICY_URL)))
+            } catch (_: android.content.ActivityNotFoundException) {
+                clipboard.setText(androidx.compose.ui.text.AnnotatedString(PRIVACY_POLICY_URL))
+                copied = true
+            }
+        }) {
+            Icon(Icons.Default.Policy, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text(ui("Política de privacidade"))
+        }
+        if (copied) {
+            Text(
+                ui("Nenhum navegador encontrado. O endereço foi copiado."),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 

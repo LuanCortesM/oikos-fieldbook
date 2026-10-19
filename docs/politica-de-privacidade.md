@@ -1,13 +1,16 @@
 # Política de Privacidade — Oikos FieldBook
 
-Última atualização: 18 de outubro de 2026
+Última atualização: 19 de outubro de 2026
 Responsável: Luan da Silva Cortes Maciel (MACIEL, L. S. C.)
 Contato: Projeto Herpeto Mantiqueira — herpetomantiqueira@gmail.com
+
+Versão publicada (com o mesmo texto): https://luancortesm.github.io/oikos-fieldbook/privacidade/
+Página gerada de `docs/privacidade/modelo.html` por `docs/privacidade/gerar.pl`.
 
 ## Resumo
 
 - O Oikos FieldBook não tem conta, login nem servidor próprio. O desenvolvedor
-  não recebe nenhum dado seu.
+  só recebe o que você mesmo enviar a ele por e-mail.
 - Tudo o que você registra (projetos, ocorrências, coordenadas, trilhas, fotos,
   áudios e anotações) fica no seu aparelho.
 - Os dados só saem do aparelho quando você exporta, faz backup ou envia um
@@ -38,11 +41,20 @@ Somente por ação sua:
   Google Drive, WhatsApp, computador etc.).
 - **Backup do aplicativo**: gera um arquivo .zip com o banco de dados, as fotos
   e os áudios e salva onde você escolher.
-- **Pacote para outro celular**: gera um arquivo para juntar projetos em outro
-  aparelho com o Oikos FieldBook.
+- **Enviar para outro celular, como arquivo**: gera um pacote para juntar
+  projetos em outro aparelho com o Oikos FieldBook. Você escolhe por onde
+  mandar (WhatsApp, e-mail, Google Drive, cabo etc.).
+- **Enviar direto para o celular ao lado**: o pacote vai de um aparelho ao
+  outro por Bluetooth e Wi-Fi, sem internet, pela conexão por proximidade do
+  Google Play Services (Nearby Connections), que é criptografada. O envio só
+  acontece depois que as duas pessoas conferem o mesmo código de 4 dígitos e
+  quem recebe toca em Aceitar. Enquanto a tela de receber está aberta, o
+  celular aparece para quem usa o Oikos FieldBook por perto com o nome do
+  aparelho; quem envia aparece com o nome do coletor do projeto ou, se não
+  houver, com o nome do aparelho.
 
-Esses arquivos podem conter coordenadas e fotos. Depois de enviados, ficam sob
-as regras do serviço que você escolheu.
+Esses arquivos e pacotes podem conter coordenadas e fotos. Depois de enviados,
+ficam sob as regras do serviço ou do aparelho que os recebeu.
 
 ## Permissões
 
@@ -54,7 +66,12 @@ as regras do serviço que você escolheu.
   mostra um aviso fixo na barra de notificações.
 - **Câmera**: fotografar o registro.
 - **Microfone**: gravar áudio (vocalizações, observação narrada).
-- **Internet e estado da rede**: os usos descritos a seguir.
+- **Dispositivos por perto, Bluetooth e Wi-Fi**: encontrar o celular ao lado e
+  enviar ou receber um pacote direto, sem internet. Usadas só enquanto a tela
+  de enviar ou de receber está aberta. No Android 11 e anteriores, o sistema
+  exige a permissão de localização para procurar aparelhos por Bluetooth; nesse
+  uso o Oikos não registra a localização.
+- **Internet e estado da rede**: os usos descritos em "Uso de internet".
 
 O aplicativo não pede acesso a contatos, agenda, SMS, chamadas nem a outros
 arquivos do aparelho. O que você importa (fotos, áudios, trilhas, mapas
@@ -88,12 +105,38 @@ aplicativo. As conexões acontecem em três casos:
    desligada, nada é enviado.
 
 Nenhum registro, fotografia, áudio, anotação ou dado de identificação é
-enviado em nenhum desses casos.
+enviado em nenhum desses casos. O envio direto para o celular ao lado não passa
+pela internet.
 
 **Se o local de coleta for sensível** (espécie ameaçada, população pequena,
 área sob pressão de coleta ilegal), use um mapa offline e mantenha a sugestão
 de endereço pelo Google desligada. A coleta e o salvamento dos registros
 funcionam normalmente sem internet.
+
+## Relatar problema ou dar ideia
+
+O botão "Relatar problema ou dar ideia" abre o seu aplicativo de e-mail com
+uma mensagem pronta para herpetomantiqueira@gmail.com. Ela leva o que você
+escreveu e, para ajudar a encontrar o problema, a versão do aplicativo e do
+Android, o modelo do aparelho e o idioma do aplicativo. Nenhum registro,
+coordenada, foto ou áudio vai junto, e nada é enviado se você não tocar em
+enviar no seu e-mail.
+
+A mensagem chega ao desenvolvedor com o seu endereço de e-mail. Ela é usada só
+para responder e melhorar o aplicativo, não é compartilhada com ninguém e é
+apagada quando deixa de ser necessária. Você pode pedir a exclusão a qualquer
+momento pelo mesmo e-mail.
+
+## Segurança
+
+- **No aparelho**: os dados ficam no armazenamento interno do aplicativo, que o
+  Android isola dos outros aplicativos.
+- **Nas conexões**: o mapa online, as listas de espécies e a sugestão de
+  endereço pelo Google usam conexões criptografadas (HTTPS). O envio direto
+  entre celulares também é criptografado.
+- **Nos arquivos que você gera**: exportações, backups e pacotes ficam sob a
+  sua guarda: guarde-os em local seguro, principalmente se tiverem coordenadas
+  de espécies sensíveis.
 
 ## Backup do sistema Android
 

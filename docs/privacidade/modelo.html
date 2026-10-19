@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Política de Privacidade — Oikos FieldBook</title>
+<meta name="description" content="Política de Privacidade do aplicativo Oikos FieldBook, caderno de campo digital para pesquisa de biodiversidade.">
+<meta name="theme-color" content="#0B0B0D">
+<style>
+  :root {
+    --bg: #0B0B0D; --bg2: #111215; --card: #17181C; --card2: #1D1E23;
+    --line: rgba(255,255,255,.08); --text: #ECECEE; --soft: #C6C7CC; --muted: #9A9BA1;
+    --orange: #FB8C00; --orange2: #FF6A00; --glow: rgba(251,140,0,.16);
+    --radius: 18px;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #F6F4F1; --bg2: #EFEBE6; --card: #FFFFFF; --card2: #FBF8F4;
+      --line: rgba(20,20,20,.09); --text: #1A1A1C; --soft: #3A3B40; --muted: #6B6C72;
+      --orange: #E07800; --orange2: #E05A00; --glow: rgba(224,120,0,.10);
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.65; font-size: 16.5px; -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--orange); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--orange) 35%, transparent); }
+  a:hover { border-bottom-color: var(--orange); }
+
+  /* Topo: sempre escuro, com o logo e o Itaguare da abertura */
+  .hero {
+    position: relative; overflow: hidden; color: #ECECEE;
+    background: radial-gradient(120% 90% at 50% 120%, rgba(255,106,0,.22) 0%, rgba(255,106,0,0) 55%), #0B0B0D;
+    padding: 56px 20px 0; text-align: center;
+  }
+  .hero img.logo { width: min(420px, 82vw); height: auto; display: block; margin: 0 auto; }
+  .hero .eyebrow { margin: 18px 0 4px; letter-spacing: .32em; font-size: 12px; font-weight: 600; color: #FB8C00; text-transform: uppercase; }
+  .hero h1 { margin: 0; font-size: clamp(30px, 6vw, 44px); font-weight: 750; letter-spacing: -.01em; }
+  .hero .meta { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin: 18px 0 0; }
+  .chip { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px;
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.10); font-size: 13.5px; color: #D9D9DC; }
+  .chip svg { width: 16px; height: 16px; fill: #FB8C00; }
+  .hero .ridge { display: block; width: min(560px, 92vw); height: auto; margin: 34px auto 0; }
+  .hero .ridge path { fill: none; stroke: #FF6A00; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+  .layout { display: grid; grid-template-columns: 240px 1fr; gap: 36px; align-items: start; padding: 40px 0 56px; }
+  @media (max-width: 860px) { .layout { grid-template-columns: 1fr; gap: 20px; padding-top: 28px; } }
+
+  /* Sumario */
+  nav.toc { position: sticky; top: 20px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 16px; }
+  nav.toc .t { font-size: 12px; letter-spacing: .22em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px 6px; }
+  nav.toc ol { list-style: none; margin: 0; padding: 0; counter-reset: s; }
+  nav.toc li { counter-increment: s; }
+  nav.toc a { display: flex; gap: 10px; padding: 7px 8px; border-radius: 10px; border: 0; color: var(--soft); font-size: 14.5px; line-height: 1.35; }
+  nav.toc a::before { content: counter(s, decimal-leading-zero); color: var(--orange); font-weight: 650; font-size: 12.5px; min-width: 20px; padding-top: 1px; }
+  nav.toc a:hover { background: var(--glow); color: var(--text); }
+  @media (max-width: 860px) { nav.toc { position: static; } nav.toc ol { columns: 2; column-gap: 8px; } }
+  @media (max-width: 480px) { nav.toc ol { columns: 1; } }
+
+  /* Resumo */
+  .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 0 0 28px; }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; position: relative; overflow: hidden; }
+  .tile::after { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: linear-gradient(90deg, var(--orange2), var(--orange)); opacity: .9; }
+  .tile .ic { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; background: var(--glow); margin-bottom: 10px; }
+  .tile .ic svg { width: 21px; height: 21px; fill: var(--orange); }
+  .tile p { margin: 0; color: var(--soft); font-size: 15px; line-height: 1.5; }
+  .tile b { color: var(--text); }
+
+  /* Secoes */
+  section { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 26px 28px; margin: 0 0 16px; scroll-margin-top: 16px; }
+  @media (max-width: 480px) {
+    body { font-size: 16px; }
+    section { padding: 20px 14px; border-radius: 16px; }
+    .summary { grid-template-columns: 1fr; gap: 10px; }
+    .tile { padding: 15px 14px; display: grid; grid-template-columns: 38px 1fr; gap: 12px; align-items: start; }
+    .tile .ic { margin: 0; }
+    .item { padding: 12px; gap: 10px; }
+    .step { padding: 12px 12px 12px 50px; }
+    .step::before { left: 11px; top: 12px; width: 28px; height: 28px; font-size: 13px; }
+  }
+  section h2 { display: flex; align-items: center; gap: 12px; margin: 0 0 12px; font-size: 21px; font-weight: 700; letter-spacing: -.005em; }
+  section h2 .n { font-size: 13px; font-weight: 700; color: var(--orange); border: 1px solid color-mix(in srgb, var(--orange) 45%, transparent); border-radius: 8px; padding: 2px 7px; letter-spacing: .04em; }
+  section p { margin: 0 0 12px; color: var(--soft); }
+  section p:last-child { margin-bottom: 0; }
+  section strong { color: var(--text); }
+
+  .list { display: grid; gap: 10px; margin: 6px 0 12px; }
+  .item { display: grid; grid-template-columns: 34px 1fr; gap: 12px; align-items: start; background: var(--card2); border: 1px solid var(--line); border-radius: 14px; padding: 13px 14px; }
+  .item .ic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--glow); }
+  .item .ic svg { width: 19px; height: 19px; fill: var(--orange); }
+  .item p { margin: 0; color: var(--soft); font-size: 15.5px; }
+  .item p strong { display: block; color: var(--text); margin-bottom: 1px; }
+
+  .steps { counter-reset: st; display: grid; gap: 10px; margin: 6px 0 12px; }
+  .step { counter-increment: st; position: relative; background: var(--card2); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px 14px 58px; }
+  .step::before { content: counter(st); position: absolute; left: 14px; top: 13px; width: 30px; height: 30px; border-radius: 50%;
+    display: grid; place-items: center; font-weight: 700; font-size: 14px; color: #1a0d00; background: linear-gradient(135deg, var(--orange), var(--orange2)); }
+  .step p { margin: 0; color: var(--soft); font-size: 15.5px; }
+  .step p strong { color: var(--text); }
+
+  .callout { display: grid; grid-template-columns: 34px 1fr; gap: 12px; border-radius: 14px; padding: 15px 16px; margin-top: 14px;
+    background: linear-gradient(135deg, var(--glow), transparent 70%); border: 1px solid color-mix(in srgb, var(--orange) 40%, transparent); }
+  .callout svg { width: 24px; height: 24px; fill: var(--orange); margin-top: 2px; }
+  .callout p { margin: 0; color: var(--soft); }
+
+  /* Rodape no estilo do credito da abertura */
+  footer { border-top: 1px solid var(--line); background: var(--bg2); padding: 36px 20px 44px; text-align: center; }
+  footer .contact { display: inline-flex; align-items: center; gap: 10px; padding: 12px 20px; border-radius: 999px; font-weight: 600; border: 0;
+    color: #1a0d00; background: linear-gradient(135deg, var(--orange), var(--orange2)); }
+  footer .contact svg { width: 18px; height: 18px; fill: #1a0d00; }
+  footer .credit { margin-top: 26px; display: inline-flex; flex-direction: column; align-items: stretch; gap: 6px; }
+  footer .credit .p { color: var(--orange); letter-spacing: .3em; font-size: 12.5px; font-weight: 650; }
+  footer .credit .d { display: flex; align-items: center; gap: 10px; color: var(--muted); letter-spacing: .32em; font-size: 10.5px; }
+  footer .credit .d::before, footer .credit .d::after { content: ""; flex: 1; height: 1.5px; background: var(--orange); }
+  footer .small { margin-top: 18px; color: var(--muted); font-size: 13px; }
+
+  @media print {
+    :root { --bg: #fff; --bg2: #fff; --card: #fff; --card2: #fff; --text: #000; --soft: #222; --muted: #555; --line: #ddd; }
+    .hero { background: #fff; color: #000; padding-top: 10px; } .hero .chip { color: #222; background: #fff; border-color: #ccc; }
+    nav.toc { display: none; } .layout { grid-template-columns: 1fr; } section, .tile { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <img class="logo" src="__LOGO__" alt="Oikos FieldBook" width="1200" height="520">
+  <p class="eyebrow">Oikos FieldBook</p>
+  <h1>Política de Privacidade</h1>
+  <div class="meta">
+    <span class="chip"><svg viewBox="0 0 24 24"><path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM7 10h5v5H7z"/></svg>Última atualização: __DATA__</span>
+    <span class="chip"><svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>Responsável: Luan da Silva Cortes Maciel (MACIEL, L. S. C.)</span>
+  </div>
+  <svg class="ridge" viewBox="0 0 802.21 158.51" aria-hidden="true"><path d="__ITAGUARE__"/></svg>
+</header>
+
+<div class="wrap">
+  <div class="layout">
+    <nav class="toc" aria-label="Sumário">
+      <p class="t">Sumário</p>
+      <ol>
+        <li><a href="#resumo">Resumo</a></li>
+        <li><a href="#no-aparelho">Dados que ficam no aparelho</a></li>
+        <li><a href="#saida">Quando os dados saem do aparelho</a></li>
+        <li><a href="#permissoes">Permissões</a></li>
+        <li><a href="#internet">Uso de internet</a></li>
+        <li><a href="#relato">Relatar problema ou dar ideia</a></li>
+        <li><a href="#seguranca">Segurança</a></li>
+        <li><a href="#backup">Backup do sistema Android</a></li>
+        <li><a href="#decisoes">Seus dados, suas decisões</a></li>
+        <li><a href="#menores">Menores de idade</a></li>
+        <li><a href="#contato">Alterações e contato</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <section id="resumo">
+        <h2><span class="n">01</span>Resumo</h2>
+        <div class="summary" style="margin-bottom:0">
+          <div class="tile"><div class="ic"><svg viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg></div>
+            <p>O Oikos FieldBook <b>não tem conta, login nem servidor próprio</b>. O desenvolvedor só recebe o que você mesmo enviar a ele por e-mail.</p></div>
+          <div class="tile"><div class="ic"><svg viewBox="0 0 24 24"><path d="M16 1H8C6.34 1 5 2.34 5 4v16c0 1.66 1.34 3 3 3h8c1.66 0 3-1.34 3-3V4c0-1.66-1.34-3-3-3zm-2 20h-4v-1h4v1zm3.25-3H6.75V4h10.5v14z"/></svg></div>
+            <p>Tudo o que você registra (projetos, ocorrências, coordenadas, trilhas, fotos, áudios e anotações) <b>fica no seu aparelho</b>.</p></div>
+          <div class="tile"><div class="ic"><svg viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/></svg></div>
+            <p>Os dados só saem do aparelho quando você exporta, faz backup ou envia um pacote para outro celular, <b>sempre para o destino que você escolher</b>.</p></div>
+          <div class="tile"><div class="ic"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg></div>
+            <p>O aplicativo usa a internet <b>só para três coisas</b>: o mapa online, o download das listas de espécies e, se você ligar essa opção, a sugestão de endereço pelo Google. Veja os detalhes em <a href="#internet">Uso de internet</a>.</p></div>
+          <div class="tile"><div class="ic"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM4 12c0-4.42 3.58-8 8-8 1.85 0 3.55.63 4.9 1.69L5.69 16.9C4.63 15.55 4 13.85 4 12zm8 8c-1.85 0-3.55-.63-4.9-1.69L18.31 7.1C19.37 8.45 20 10.15 20 12c0 4.42-3.58 8-8 8z"/></svg></div>
+            <p><b>Não há publicidade</b>, análise de uso, rastreamento nem identificador de anúncio.</p></div>
+        </div>
+      </section>
+
+      <section id="no-aparelho">
+        <h2><span class="n">02</span>Dados que ficam no aparelho</h2>
+        <p>Projetos, expedições, ocorrências, campos Darwin Core, coordenadas, trilhas GPS, fotografias, gravações de áudio e anotações ficam no armazenamento interno do aplicativo, que o Android isola dos outros aplicativos. Eles ficam guardados até você apagá-los.</p>
+        <p>Ao apagar um projeto, uma expedição ou uma ocorrência, o item vai para a lixeira do aplicativo e é removido de vez depois de 30 dias, ou antes, se você esvaziar a lixeira. Desinstalar o aplicativo remove todos os dados do aparelho.</p>
+      </section>
+
+      <section id="saida">
+        <h2><span class="n">03</span>Quando os dados saem do aparelho</h2>
+        <p>Somente por ação sua:</p>
+        <div class="list">
+          <div class="item"><div class="ic"><svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg></div>
+            <p><strong>Exportar</strong>gera planilhas, Darwin Core Archive e outros arquivos. Você escolhe, na tela de compartilhamento do Android, para onde enviar (e-mail, Google Drive, WhatsApp, computador etc.).</p></div>
+          <div class="item"><div class="ic"><svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg></div>
+            <p><strong>Backup do aplicativo</strong>gera um arquivo .zip com o banco de dados, as fotos e os áudios e salva onde você escolher.</p></div>
+          <div class="item"><div class="ic"><svg viewBox="0 0 24 24"><path d="M16 1H8C6.34 1 5 2.34 5 4v16c0 1.66 1.34 3 3 3h8c1.66 0 3-1.34 3-3V4c0-1.66-1.34-3-3-3zm-2 20h-4v-1h4v1zm3.25-3H6.75V4h10.5v14z"/></svg></div>
+            <p><strong>Enviar para outro celular, como arquivo</strong>gera um pacote para juntar projetos em outro aparelho com o Oikos FieldBook. Você escolhe por onde mandar (WhatsApp, e-mail, Google Drive, cabo etc.).</p></div>
+          <div class="item"><div class="ic"><svg viewBox="0 0 24 24"><path d="M17.71 7.71L12 2h-1v7.59L6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 11 14.41V22h1l5.71-5.71-4.3-4.29 4.3-4.29zM13 5.83l1.88 1.88L13 9.59V5.83zm1.88 10.46L13 18.17v-3.76l1.88 1.88z"/></svg></div>
+            <p><strong>Enviar direto para o celular ao lado</strong>o pacote vai de um aparelho ao outro por Bluetooth e Wi-Fi, sem internet, pela conexão por proximidade do Google Play Services (Nearby Connections), que é criptografada. O envio só acontece depois que as duas pessoas conferem o mesmo código de 4 dígitos e quem recebe toca em Aceitar. Enquanto a tela de receber está aberta, o celular aparece para quem usa o Oikos FieldBook por perto com o nome do aparelho; quem envia aparece com o nome do coletor do projeto ou, se não houver, com o nome do aparelho.</p></div>
+        </div>
+        <p>Esses arquivos e pacotes podem conter coordenadas e fotos. Depois de enviados, ficam sob as regras do serviço ou do aparelho que os recebeu.</p>
+      </section>
+
+      <section id="permissoes">
+        <h2><span class="n">04</span>Permissões</h2>
+        <div class="list">
+          <div class="item"><div class="ic"><svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg></div>
+            <p><strong>Localização (precisa e aproximada)</strong>Registrar a coordenada da ocorrência e os pontos da trilha. Usada só quando você captura uma localização ou mantém uma trilha ativa.</p></div>
+          <div class="item"><div class="ic"><svg viewBox="0 0 24 24"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg></div>
+            <p><strong>Localização em primeiro plano, notificações e manter o aparelho ativo</strong>Continuar gravando a trilha com a tela apagada. Enquanto isso, o Android mostra um aviso fixo na barra de notificações.</p></div>
+          <div class="item"><div class="ic"><svg viewBox="0 0 24 24"><path d="M9 2L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8.2c-1.77 0-3.2 1.43-3.2 3.2s1.43 3.2 3.2 3.2 3.2-1.43 3.2-3.2-1.43-3.2-3.2-3.2z"/></svg></div>
+            <p><strong>Câmera</strong>Fotografar o registro.</p></div>
+          <div class="item"><div class="ic"><svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></svg></div>
+            <p><strong>Microfone</strong>Gravar áudio (vocalizações, observação narrada).</p></div>
+          <div class="item"><div class="ic"><svg viewBox="0 0 24 24"><path d="M17.71 7.71L12 2h-1v7.59L6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 11 14.41V22h1l5.71-5.71-4.3-4.29 4.3-4.29zM13 5.83l1.88 1.88L13 9.59V5.83zm1.88 10.46L13 18.17v-3.76l1.88 1.88z"/></svg></div>
+            <p><strong>Dispositivos por perto, Bluetooth e Wi-Fi</strong>Encontrar o celular ao lado e enviar ou receber um pacote direto, sem internet. Usadas só enquanto a tela de enviar ou de receber está aberta. No Android 11 e anteriores, o sistema exige a permissão de localização para procurar aparelhos por Bluetooth; nesse uso o Oikos não registra a localização.</p></div>
+          <div class="item"><div class="ic"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg></div>
+            <p><strong>Internet e estado da rede</strong>Os usos descritos em <a href="#internet">Uso de internet</a>.</p></div>
+        </div>
+        <p>O aplicativo não pede acesso a contatos, agenda, SMS, chamadas nem a outros arquivos do aparelho. O que você importa (fotos, áudios, trilhas, mapas offline, backups) é escolhido por você, arquivo por arquivo, no seletor do Android.</p>
+      </section>
+
+      <section id="internet">
+        <h2><span class="n">05</span>Uso de internet</h2>
+        <p>O município e o estado de uma coordenada no Brasil são calculados no próprio aparelho, sem internet, com a Malha Municipal 2022 do IBGE, que vem dentro do aplicativo. As conexões acontecem em três casos:</p>
+        <div class="steps">
+          <div class="step"><p><strong>Mapa online.</strong> Ao abrir um mapa sem ter escolhido um mapa offline, o aplicativo baixa as imagens do mapa do OpenStreetMap. O servidor recebe a área visualizada e o endereço IP do aparelho, como em qualquer aplicativo de mapas, e segue a <a href="https://osmfoundation.org/wiki/Privacy_Policy">política de privacidade da OpenStreetMap Foundation</a>. Com um mapa offline (arquivo MBTiles importado em Configurações), nenhuma imagem é pedida à internet.</p></div>
+          <div class="step"><p><strong>Listas de espécies.</strong> Ao baixar uma lista (Flora e Funga do Brasil, Catálogo Taxonômico da Fauna do Brasil) ou abrir a tela de listas, que confere se há versão nova, o aplicativo acessa o IPT do Jardim Botânico do Rio de Janeiro ou, se o IPT recusar a conexão, o ChecklistBank (Catalogue of Life/GBIF). Esses pedidos não levam coordenadas nem registros; o servidor recebe apenas o endereço IP do aparelho.</p></div>
+          <div class="step"><p><strong>Sugestão de endereço pelo Google (opcional, desligada por padrão).</strong> Se você ligar "Sugerir endereço pelo Google" em Configurações, a coordenada capturada é enviada ao serviço de endereços do Google (Geocoder do Android) para preencher município, estado e país. A coordenada vai só ao Google, só para obter o endereço, e o tratamento por ele segue a <a href="https://policies.google.com/privacy">política de privacidade do Google</a>. Com a opção desligada, nada é enviado.</p></div>
+        </div>
+        <p>Nenhum registro, fotografia, áudio, anotação ou dado de identificação é enviado em nenhum desses casos. O envio direto para o celular ao lado não passa pela internet.</p>
+        <div class="callout"><svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>
+          <p><strong>Se o local de coleta for sensível</strong> (espécie ameaçada, população pequena, área sob pressão de coleta ilegal), use um mapa offline e mantenha a sugestão de endereço pelo Google desligada. A coleta e o salvamento dos registros funcionam normalmente sem internet.</p></div>
+      </section>
+
+      <section id="relato">
+        <h2><span class="n">06</span>Relatar problema ou dar ideia</h2>
+        <p>O botão "Relatar problema ou dar ideia" abre o seu aplicativo de e-mail com uma mensagem pronta para herpetomantiqueira@gmail.com. Ela leva o que você escreveu e, para ajudar a encontrar o problema, a versão do aplicativo e do Android, o modelo do aparelho e o idioma do aplicativo. Nenhum registro, coordenada, foto ou áudio vai junto, e nada é enviado se você não tocar em enviar no seu e-mail.</p>
+        <p>A mensagem chega ao desenvolvedor com o seu endereço de e-mail. Ela é usada só para responder e melhorar o aplicativo, não é compartilhada com ninguém e é apagada quando deixa de ser necessária. Você pode pedir a exclusão a qualquer momento pelo mesmo e-mail.</p>
+      </section>
+
+      <section id="seguranca">
+        <h2><span class="n">07</span>Segurança</h2>
+        <div class="list">
+          <div class="item"><div class="ic"><svg viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg></div>
+            <p><strong>No aparelho</strong>Os dados ficam no armazenamento interno do aplicativo, que o Android isola dos outros aplicativos.</p></div>
+          <div class="item"><div class="ic"><svg viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg></div>
+            <p><strong>Nas conexões</strong>O mapa online, as listas de espécies e a sugestão de endereço pelo Google usam conexões criptografadas (HTTPS). O envio direto entre celulares também é criptografado.</p></div>
+          <div class="item"><div class="ic"><svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/></svg></div>
+            <p><strong>Nos arquivos que você gera</strong>Exportações, backups e pacotes ficam sob a sua guarda: guarde-os em local seguro, principalmente se tiverem coordenadas de espécies sensíveis.</p></div>
+        </div>
+      </section>
+
+      <section id="backup">
+        <h2><span class="n">08</span>Backup do sistema Android</h2>
+        <p>Se o backup automático da conta Google estiver ligado no aparelho, o Android inclui nele o banco de dados dos registros e as configurações do Oikos. Fotos, áudios, mapas offline e listas de espécies ficam de fora, por causa do limite de 25 MB por aplicativo, e são cobertos pelo backup do próprio aplicativo. Na transferência direta para um celular novo, o Android pode copiar também as fotos e os áudios. Esse backup e essa transferência são feitos pelo sistema, ficam na conta Google do próprio usuário e o desenvolvedor não tem acesso a eles. Para desligar, use as configurações de backup do Android.</p>
+      </section>
+
+      <section id="decisoes">
+        <h2><span class="n">09</span>Seus dados, suas decisões</h2>
+        <p>Como os dados ficam só no seu aparelho, você mesmo pode consultá-los, corrigir, exportar ou apagar a qualquer momento, dentro do aplicativo. O desenvolvedor não tem cópia deles e, por isso, não consegue recuperá-los se forem apagados ou se o aparelho for perdido: faça backups.</p>
+      </section>
+
+      <section id="menores">
+        <h2><span class="n">10</span>Menores de idade</h2>
+        <p>O aplicativo é voltado a pesquisadores, estudantes, monitores ambientais e demais pessoas em atividades de campo, e não é direcionado a crianças.</p>
+      </section>
+
+      <section id="contato">
+        <h2><span class="n">11</span>Alterações e contato</h2>
+        <p>Mudanças nesta política são publicadas junto com a atualização do aplicativo, com a data no topo desta página. Dúvidas ou pedidos sobre privacidade: Projeto Herpeto Mantiqueira, <a href="mailto:herpetomantiqueira@gmail.com">herpetomantiqueira@gmail.com</a>.</p>
+      </section>
+    </main>
+  </div>
+</div>
+
+<footer>
+  <a class="contact" href="mailto:herpetomantiqueira@gmail.com"><svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>herpetomantiqueira@gmail.com</a>
+  <div><span class="credit"><span class="p">PROJETO HERPETO MANTIQUEIRA</span><span class="d">DEVELOPED BY MACIEL, L. S. C.</span></span></div>
+  <p class="small">Oikos FieldBook · Política de Privacidade</p>
+</footer>
+
+</body>
+</html>

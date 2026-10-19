@@ -714,5 +714,7 @@ internal val englishText: Map<String, String> = mapOf(
     "Qual é a dúvida?" to "What is your question?",
     "Abre o seu app de e-mail com a mensagem pronta para você conferir e enviar. Junto vão a versão do app e do Android e o modelo do aparelho, para ajudar a achar o problema." to "Opens your email app with the message ready for you to check and send. The app and Android versions and the phone model go along, to help find the problem.",
     "Abrir e-mail" to "Open email",
-    "Nenhum app de e-mail encontrado. A mensagem foi copiada: cole num e-mail para herpetomantiqueira@gmail.com." to "No email app found. The message was copied: paste it into an email to herpetomantiqueira@gmail.com."
+    "Nenhum app de e-mail encontrado. A mensagem foi copiada: cole num e-mail para herpetomantiqueira@gmail.com." to "No email app found. The message was copied: paste it into an email to herpetomantiqueira@gmail.com.",
+    "Política de privacidade" to "Privacy policy",
+    "Nenhum navegador encontrado. O endereço foi copiado." to "No browser found. The address was copied."
 )
