@@ -28,6 +28,8 @@ class ProjectTransferTest {
 
     @Before
     fun setUp() = runBlocking {
+        // As mensagens conferidas aqui sao as em portugues, qualquer que seja o idioma do emulador.
+        com.oikos.fieldbook.util.UiLanguage.testOverride = com.oikos.fieldbook.util.AppLanguage.PT
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         phoneA = Room.inMemoryDatabaseBuilder(context, OikosDatabase::class.java).build()
         phoneB = Room.inMemoryDatabaseBuilder(context, OikosDatabase::class.java).build()
@@ -50,6 +52,7 @@ class ProjectTransferTest {
 
     @After
     fun tearDown() {
+        com.oikos.fieldbook.util.UiLanguage.testOverride = null
         phoneA.close()
         phoneB.close()
         filesA.deleteRecursively()

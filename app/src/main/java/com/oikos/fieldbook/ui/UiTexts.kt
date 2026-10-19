@@ -702,5 +702,17 @@ internal val englishText: Map<String, String> = mapOf(
     "Escolha os grupos das listas de espécies que entram nas sugestões de nome. Sem nenhum marcado, valem todos." to "Choose the species list groups used for name suggestions. With none selected, all groups are used.",
     "Todos os grupos" to "All groups",
     "Flora e Funga" to "Flora and Fungi",
-    "Distribuição na lista" to "Distribution in the list"
+    "Distribuição na lista" to "Distribution in the list",
+    "Relatar problema ou dar ideia" to "Report a problem or share an idea",
+    "Achou um erro ou tem uma ideia para o app? Escreva aqui; a mensagem chega direto ao desenvolvedor." to "Found a bug or have an idea for the app? Write it here; the message goes straight to the developer.",
+    "Escrever" to "Write",
+    "Problema" to "Problem",
+    "Ideia" to "Idea",
+    "Dúvida" to "Question",
+    "O que aconteceu?" to "What happened?",
+    "Qual é a ideia?" to "What is your idea?",
+    "Qual é a dúvida?" to "What is your question?",
+    "Abre o seu app de e-mail com a mensagem pronta para você conferir e enviar. Junto vão a versão do app e do Android e o modelo do aparelho, para ajudar a achar o problema." to "Opens your email app with the message ready for you to check and send. The app and Android versions and the phone model go along, to help find the problem.",
+    "Abrir e-mail" to "Open email",
+    "Nenhum app de e-mail encontrado. A mensagem foi copiada: cole num e-mail para herpetomantiqueira@gmail.com." to "No email app found. The message was copied: paste it into an email to herpetomantiqueira@gmail.com."
 )

@@ -74,6 +74,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.Feedback
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.PhoneAndroid
@@ -667,13 +668,30 @@ private fun HideWithKeyboard(content: @Composable () -> Unit) {
 private fun OikosTopBar(title: String, onBack: (() -> Unit)? = null, actions: @Composable () -> Unit = {}) {
     CenterAlignedTopAppBar(
         // Uma linha com reticencias: em tela de 320 dp o titulo quebrava letra
-        // a letra ("Exped / icao / 2026...") espremido pelos icones.
-        title = { Text(ui(title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        // a letra ("Exped / icao / 2026...") espremido pelos icones. Antes das
+        // reticencias, a letra diminui um pouco se o titulo nao couber.
+        title = { FittingTitle(ui(title)) },
         navigationIcon = {
             if (onBack != null) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, ui("Voltar")) }
         },
         actions = { actions() }
     )
+}
+
+/** Titulo de uma linha: no tamanho normal se couber; senao 85% ou 75% dele; so entao reticencias. */
+@Composable
+private fun FittingTitle(text: String) {
+    BoxWithConstraints {
+        val base = androidx.compose.material3.LocalTextStyle.current
+        val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+        val style = if (!constraints.hasBoundedWidth) base else {
+            listOf(1f, 0.85f, 0.75f)
+                .map { base.copy(fontSize = base.fontSize * it) }
+                .firstOrNull { measurer.measure(text, it, maxLines = 1, softWrap = false).size.width <= constraints.maxWidth }
+                ?: base.copy(fontSize = base.fontSize * 0.75f)
+        }
+        Text(text, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
 }
 
 @Composable
@@ -701,10 +719,18 @@ private fun ProjectListScreen(
             }
         )
     }
+    // Relato de problema ou ideia: um toque na tela inicial, ao lado da engrenagem.
+    var showFeedback by rememberSaveable { mutableStateOf(false) }
+    var feedbackKind by rememberSaveable { mutableStateOf("problem") }
+    var feedbackText by rememberSaveable { mutableStateOf("") }
+    if (showFeedback) {
+        FeedbackDialog(feedbackKind, feedbackText, onKind = { feedbackKind = it }, onText = { feedbackText = it }, onDismiss = { showFeedback = false })
+    }
     Scaffold(
         modifier = modifier,
         topBar = {
             OikosTopBar("Oikos FieldBook", actions = {
+                IconButton(onClick = { showFeedback = true }) { Icon(Icons.Default.Feedback, ui("Relatar problema ou dar ideia")) }
                 IconButton(onClick = onStorage) { Icon(Icons.Default.Settings, ui("Configurações")) }
                 TextButton(onClick = onAbout) { Text(ui("Sobre")) }
             })
@@ -4135,6 +4161,7 @@ private fun SettingsScreen(
                 }
             }
             NetworkPrivacyCard()
+            FeedbackCard()
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), elevation = CardDefaults.cardElevation(2.dp)) {
                 Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     // Os antigos controles de "area" e "detalhe" do cache eram
@@ -5745,6 +5772,7 @@ private fun AboutScreen(modifier: Modifier, onBack: () -> Unit) {
                 }
             }
             }
+            item { FeedbackCard() }
             item { HowToCiteCard() }
             item { OpenSourceLicensesCard() }
             item {
@@ -5911,6 +5939,106 @@ private fun LicenseTextDialog(title: String, asset: String, onDismiss: () -> Uni
 }
 
 /** Para onde vai (e nao vai) a informacao; aberto sob demanda nas Configuracoes. */
+/**
+ * Relato de problema, ideia ou duvida. A pessoa escreve aqui e o app de e-mail
+ * do celular abre com tudo pronto para ela conferir e enviar: sem servidor, sem
+ * sinal a mensagem espera na caixa de saida, e da para responder a quem
+ * escreveu. O texto fica guardado enquanto a tela estiver aberta, para nao se
+ * perder se a pessoa voltar do e-mail sem enviar.
+ */
+@Composable
+private fun FeedbackCard() {
+    var open by rememberSaveable { mutableStateOf(false) }
+    var kind by rememberSaveable { mutableStateOf("problem") }
+    var text by rememberSaveable { mutableStateOf("") }
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), elevation = CardDefaults.cardElevation(2.dp)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(ui("Relatar problema ou dar ideia"), style = MaterialTheme.typography.titleMedium)
+            Text(
+                ui("Achou um erro ou tem uma ideia para o app? Escreva aqui; a mensagem chega direto ao desenvolvedor."),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Button(onClick = { open = true }) {
+                Icon(Icons.Default.Feedback, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(ui("Escrever"))
+            }
+        }
+    }
+    if (open) {
+        FeedbackDialog(kind, text, onKind = { kind = it }, onText = { text = it }, onDismiss = { open = false })
+    }
+}
+
+@Composable
+private fun FeedbackDialog(kind: String, text: String, onKind: (String) -> Unit, onText: (String) -> Unit, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val language = LocalOikosLanguage.current
+    var noEmailApp by remember { mutableStateOf(false) }
+    val kinds = listOf("problem" to "Problema", "idea" to "Ideia", "question" to "Dúvida")
+    val kindLabel = ui(kinds.first { it.first == kind }.second)
+    val deviceLabel = tr("Aparelho", "Device", "Dispositivo")
+    val languageLabel = tr("Idioma do app", "App language", "Idioma de la app")
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(ui("Relatar problema ou dar ideia")) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    kinds.forEach { (value, label) ->
+                        FilterChip(selected = kind == value, onClick = { onKind(value) }, label = { Text(ui(label)) })
+                    }
+                }
+                TextInput(
+                    when (kind) {
+                        "idea" -> "Qual é a ideia?"
+                        "question" -> "Qual é a dúvida?"
+                        else -> "O que aconteceu?"
+                    },
+                    text,
+                    minLines = 4
+                ) { onText(it) }
+                Text(
+                    ui("Abre o seu app de e-mail com a mensagem pronta para você conferir e enviar. Junto vão a versão do app e do Android e o modelo do aparelho, para ajudar a achar o problema."),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (noEmailApp) {
+                    Text(
+                        ui("Nenhum app de e-mail encontrado. A mensagem foi copiada: cole num e-mail para herpetomantiqueira@gmail.com."),
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(enabled = text.isNotBlank(), onClick = {
+                val subject = com.oikos.fieldbook.ui.FeedbackEmail.subject(BuildConfig.VERSION_NAME, kindLabel)
+                val body = com.oikos.fieldbook.ui.FeedbackEmail.body(
+                    text = text,
+                    appVersion = BuildConfig.VERSION_NAME,
+                    appBuild = BuildConfig.VERSION_CODE,
+                    androidRelease = Build.VERSION.RELEASE.orEmpty(),
+                    androidSdk = Build.VERSION.SDK_INT,
+                    device = "${Build.MANUFACTURER} ${Build.MODEL}",
+                    deviceLabel = deviceLabel,
+                    languageLabel = languageLabel,
+                    languageCode = language.code
+                )
+                try {
+                    context.startActivity(com.oikos.fieldbook.ui.FeedbackEmail.intent(subject, body))
+                    onDismiss()
+                } catch (_: android.content.ActivityNotFoundException) {
+                    clipboard.setText(androidx.compose.ui.text.AnnotatedString("$subject\n\n$body"))
+                    noEmailApp = true
+                }
+            }) { Text(ui("Abrir e-mail")) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(ui("Cancelar")) } }
+    )
+}
+
 @Composable
 private fun NetworkPrivacyCard() {
     ExpandableInfoCard(ui("Uso de rede e privacidade")) {

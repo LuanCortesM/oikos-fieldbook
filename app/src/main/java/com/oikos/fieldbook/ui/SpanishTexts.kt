@@ -700,5 +700,17 @@ internal val spanishText: Map<String, String> = mapOf(
     "Escolha os grupos das listas de espécies que entram nas sugestões de nome. Sem nenhum marcado, valem todos." to "Elige los grupos de las listas de especies que se usan en las sugerencias de nombre. Si no marcas ninguno, se usan todos.",
     "Todos os grupos" to "Todos los grupos",
     "Flora e Funga" to "Flora y Funga",
-    "Distribuição na lista" to "Distribución en la lista"
+    "Distribuição na lista" to "Distribución en la lista",
+    "Relatar problema ou dar ideia" to "Reportar un problema o dar una idea",
+    "Achou um erro ou tem uma ideia para o app? Escreva aqui; a mensagem chega direto ao desenvolvedor." to "¿Encontraste un error o tienes una idea para la app? Escríbela aquí; el mensaje llega directo al desarrollador.",
+    "Escrever" to "Escribir",
+    "Problema" to "Problema",
+    "Ideia" to "Idea",
+    "Dúvida" to "Duda",
+    "O que aconteceu?" to "¿Qué pasó?",
+    "Qual é a ideia?" to "¿Cuál es tu idea?",
+    "Qual é a dúvida?" to "¿Cuál es tu duda?",
+    "Abre o seu app de e-mail com a mensagem pronta para você conferir e enviar. Junto vão a versão do app e do Android e o modelo do aparelho, para ajudar a achar o problema." to "Abre tu app de correo con el mensaje listo para que lo revises y lo envíes. También van la versión de la app y de Android y el modelo del dispositivo, para ayudar a encontrar el problema.",
+    "Abrir e-mail" to "Abrir correo",
+    "Nenhum app de e-mail encontrado. A mensagem foi copiada: cole num e-mail para herpetomantiqueira@gmail.com." to "No se encontró ninguna app de correo. El mensaje se copió: pégalo en un correo a herpetomantiqueira@gmail.com."
 )

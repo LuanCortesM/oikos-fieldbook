@@ -29,6 +29,8 @@ class TrashServiceTest {
 
     @Before
     fun setUp() = runBlocking {
+        // As mensagens conferidas aqui sao as em portugues, qualquer que seja o idioma do emulador.
+        com.oikos.fieldbook.util.UiLanguage.testOverride = com.oikos.fieldbook.util.AppLanguage.PT
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         db = Room.inMemoryDatabaseBuilder(context, OikosDatabase::class.java).build()
         filesDir = File(context.cacheDir, "trash-test-${System.nanoTime()}").apply { mkdirs() }
@@ -45,6 +47,7 @@ class TrashServiceTest {
 
     @After
     fun tearDown() {
+        com.oikos.fieldbook.util.UiLanguage.testOverride = null
         db.close()
         filesDir.deleteRecursively()
     }
