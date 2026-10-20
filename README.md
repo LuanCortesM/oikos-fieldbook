@@ -104,7 +104,7 @@ O começo de cada gerador explica de onde baixar a fonte e como rodar. Os ícone
 
 ## Como citar
 
-> Maciel, L. S. C. (2026). *Oikos FieldBook* (Version 0.2.1) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.20526746
+> Maciel, L. S. C. (2026). *Oikos FieldBook* (Version 0.2.2) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.20526746
 
 O DOI vale para todas as versões e sempre leva à mais recente. A tela Sobre do app traz também a referência em ABNT e Vancouver, já com a data de acesso. O botão "Cite this repository" do GitHub usa o [`CITATION.cff`](CITATION.cff).
 
