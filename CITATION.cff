@@ -9,8 +9,8 @@ abstract: >-
 authors:
   - family-names: "Maciel"
     given-names: "Luan da Silva Cortes"
-version: "0.2.2"
-date-released: "2026-10-20"
+version: "0.2.3"
+date-released: "2026-10-24"
 doi: "10.5281/zenodo.20526746"
 repository-code: "https://github.com/LuanCortesM/oikos-fieldbook"
 url: "https://play.google.com/store/apps/details?id=com.oikos.fieldbook"
