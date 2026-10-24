@@ -57,7 +57,7 @@ class OikosExporterTest {
         assertEquals("-22.5", row["decimalLatitude"])
         assertEquals("", row["coordinateUncertaintyInMeters"])
         assertEquals("", row["minimumElevationInMeters"])
-        assertEquals("SIRGAS 2000", row["geodeticDatum"])
+        assertEquals("EPSG:4674", row["geodeticDatum"])
     }
 
     @Test
@@ -66,7 +66,29 @@ class OikosExporterTest {
         assertEquals("-22.97", row["decimalLatitude"])
         assertEquals("4", row["coordinateUncertaintyInMeters"])
         assertEquals("40", row["minimumElevationInMeters"])
-        assertEquals("WGS84", row["geodeticDatum"])
+        assertEquals("EPSG:4326", row["geodeticDatum"])
+    }
+
+    @Test
+    fun datumSaiComOCodigoEpsgQueOGbifReconhece() {
+        // Com "SIRGAS 2000" o GBIF marcava GEODETIC_DATUM_INVALID e assumia WGS84.
+        val sirgas = occurrence(1) { copy(latitude = -22.5, longitude = -45.0, geodeticDatum = "SIRGAS 2000") }
+        val entries = readZip(export(ExportFormat.DwcArchive, listOf(sirgas)))
+        val core = entries.getValue("occurrence.txt").lines()
+        val row = core.first().split('\t').zip(core[1].split('\t')).toMap()
+        assertEquals("EPSG:4674", row["geodeticDatum"])
+        assertFalse(entries.getValue("occurrence.txt"), entries.getValue("occurrence.txt").contains("SIRGAS"))
+
+        val properties = JSONObject(export(ExportFormat.GeoJson, listOf(sirgas)).readText())
+            .getJSONArray("features").getJSONObject(0).getJSONObject("properties")
+        assertEquals("EPSG:4674", properties.getString("geodeticDatum"))
+
+        val utm = csvRows(export(ExportFormat.Csv, listOf(sirgas), exportProject = project.copy(coordinateFormat = "UTM"))).single()
+        assertEquals("EPSG:4674", utm["verbatimSRS"])
+
+        // O LEIA-ME, lido por pessoas, mostra o nome escolhido e o codigo.
+        val readme = readZip(export(ExportFormat.Zip, listOf(sirgas))).entries.single { it.key.endsWith("README.txt") }.value
+        assertTrue(readme, readme.contains("SIRGAS 2000 (EPSG:4674)"))
     }
 
     @Test

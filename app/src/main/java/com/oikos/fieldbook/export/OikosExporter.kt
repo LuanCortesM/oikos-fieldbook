@@ -262,8 +262,8 @@ private class ExportPackage(
                 "accuracy" to decimal(point.accuracy),
                 "timestamp" to knownTime(point.timestamp),
                 "speed" to decimal(point.speed),
-                "geodeticDatum" to track.geodeticDatum
-            ).withVerbatim(point.latitude, point.longitude, track.geodeticDatum)
+                "geodeticDatum" to DatumCodes.forExport(track.geodeticDatum)
+            ).withVerbatim(point.latitude, point.longitude, DatumCodes.forExport(track.geodeticDatum))
         }
     })
 
@@ -308,12 +308,12 @@ private class ExportPackage(
                 // Data do registro, nao a da expedicao (antes era sempre a da expedicao).
                 .put("eventDate", eventDateOf(occurrence, session))
                 .put("coordinateUncertaintyInMeters", decimal(place.uncertainty))
-                .put("geodeticDatum", place.datum)
+                .put("geodeticDatum", DatumCodes.forExport(place.datum))
                 .put("associatedMedia", associatedMedia(links))
                 .put("mediaCount", links.size)
                 .put("photoCount", links.count { it.type == "photo" })
                 .put("audioCount", links.count { it.type == "audio" })
-            linkedMapOf<String, String>().withVerbatim(place.latitude, place.longitude, place.datum)
+            linkedMapOf<String, String>().withVerbatim(place.latitude, place.longitude, DatumCodes.forExport(place.datum))
                 .forEach { (key, value) -> properties.put(key, value) }
             val geometry = JSONObject()
                 .put("type", "Point")
@@ -391,7 +391,7 @@ private class ExportPackage(
                         )
                     }
                 ),
-                listOf("geodeticDatum", project.defaultDatum),
+                listOf("geodeticDatum", DatumCodes.forExport(project.defaultDatum)),
                 listOf("warnings", validationWarnings(language = language)),
                 listOf(say("comoCitarOApp", "howToCiteTheApp", "comoCitarLaApp"), AppCitation.apa(appVersion))
             )
@@ -710,7 +710,7 @@ private class ExportPackage(
             .put("coordinateFormat", project.coordinateFormat)
             .put("coordinateStorage", "decimalDegrees")
             .put("utmColumnsIncluded", project.coordinateFormat == "UTM")
-            .put("geodeticDatum", project.defaultDatum)
+            .put("geodeticDatum", DatumCodes.forExport(project.defaultDatum))
             .put("files", JSONArray(files))
             .put("mediaLinks", JSONArray(mediaLinks.map { JSONObject(it.manifestMap()) }))
             .put("gpsTracks", JSONArray(tracks.map { JSONObject(trackMap(it)) }))
@@ -725,7 +725,7 @@ private class ExportPackage(
 
         Proyecto: ${project.name}
         Exportado el: ${exportedAt()}
-        Datum: ${project.defaultDatum}
+        Datum: ${DatumCodes.withCode(project.defaultDatum)}
         Coordenadas internas/Darwin Core: grados decimales (decimalLatitude, decimalLongitude)
         Altitud: metros sobre el nivel del mar. El GPS mide la altura sobre el elipsoide WGS84; la app la convierte con el geoide EGM2008, y esos registros llevan verticalDatum = EGM2008.
         Formato de coordenadas configurado en el proyecto: ${project.coordinateFormat}
@@ -757,7 +757,7 @@ private class ExportPackage(
 
         Project: ${project.name}
         Exported at: ${exportedAt()}
-        Datum: ${project.defaultDatum}
+        Datum: ${DatumCodes.withCode(project.defaultDatum)}
         Internal/Darwin Core coordinates: decimal degrees (decimalLatitude, decimalLongitude)
         Altitude: meters above sea level. The GPS measures height above the WGS84 ellipsoid; the app converts it with the EGM2008 geoid, and those records carry verticalDatum = EGM2008.
         Coordinate format set in the project: ${project.coordinateFormat}
@@ -789,7 +789,7 @@ private class ExportPackage(
 
         Projeto: ${project.name}
         Exportado em: ${exportedAt()}
-        Datum: ${project.defaultDatum}
+        Datum: ${DatumCodes.withCode(project.defaultDatum)}
         Coordenadas internas/Darwin Core: Graus Decimais (decimalLatitude, decimalLongitude)
         Altitude: metros sobre o nível do mar. O GPS mede a altura sobre o elipsoide WGS84; o app a converte pelo geoide EGM2008, e esses registros trazem verticalDatum = EGM2008.
         Formato configurado no projeto: ${project.coordinateFormat}
@@ -833,7 +833,7 @@ private class ExportPackage(
         val place = placeOf(occurrence, session)
         val latitude = place.latitude
         val longitude = place.longitude
-        val datum = place.datum
+        val datum = DatumCodes.forExport(place.datum)
         val base = linkedMapOf(
             "occurrenceID" to occurrence.occurrenceId,
             "eventID" to session?.eventId.orEmpty(),
@@ -892,9 +892,9 @@ private class ExportPackage(
             "decimalLatitude" to decimal(session.latitude),
             "decimalLongitude" to decimal(session.longitude),
             "coordinateUncertaintyInMeters" to decimal(session.coordinateUncertaintyInMeters),
-            "geodeticDatum" to session.geodeticDatum,
+            "geodeticDatum" to DatumCodes.forExport(session.geodeticDatum),
             "eventRemarks" to session.notes
-        ).withVerbatim(session.latitude, session.longitude, session.geodeticDatum)
+        ).withVerbatim(session.latitude, session.longitude, DatumCodes.forExport(session.geodeticDatum))
 
     private fun projectMap(): Map<String, String> = mapOf(
         "projectID" to "PROJ-${project.id.toString().padStart(3, '0')}",
@@ -928,7 +928,7 @@ private class ExportPackage(
         "duration" to if (track.startTime > 0L) track.duration.toString() else "",
         "pointsCount" to track.pointsCount.toString(),
         "coordinateFormat" to track.coordinateFormat,
-        "geodeticDatum" to track.geodeticDatum
+        "geodeticDatum" to DatumCodes.forExport(track.geodeticDatum)
     )
 
     private fun trackPointRows(): List<Map<String, String>> = tracks.flatMap { track ->
@@ -944,8 +944,8 @@ private class ExportPackage(
                 "accuracy" to decimal(point.accuracy),
                 "timestamp" to knownTime(point.timestamp),
                 "speed" to decimal(point.speed),
-                "geodeticDatum" to track.geodeticDatum
-            ).withVerbatim(point.latitude, point.longitude, track.geodeticDatum)
+                "geodeticDatum" to DatumCodes.forExport(track.geodeticDatum)
+            ).withVerbatim(point.latitude, point.longitude, DatumCodes.forExport(track.geodeticDatum))
         }
     }
 
