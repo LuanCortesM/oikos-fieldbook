@@ -94,6 +94,14 @@ class DarwinCoreArchiveTest {
     }
 
     @Test
+    fun `nome do autor sai separado em prenome e sobrenome`() {
+        val eml = build().getValue("eml.xml")
+        assertTrue(eml, eml.contains("<individualName><givenName>L. S. C.</givenName><surName>MACIEL</surName></individualName>"))
+        assertEquals("Luan da Silva Cortes" to "Maciel", DarwinCoreArchive.personName("Luan da Silva Cortes Maciel"))
+        assertEquals("" to "Maciel", DarwinCoreArchive.personName(" Maciel "))
+    }
+
+    @Test
     fun `meta e eml sao xml bem formado`() {
         val conteudo = build(
             mofRows = listOf(mapOf("occurrenceID" to "occ-001", "measurementType" to "DAP", "measurementValue" to "12.4"))

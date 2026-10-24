@@ -234,6 +234,20 @@ object DarwinCoreArchive {
     }
 
     /**
+     * Prenome e sobrenome para o individualName do EML, que o IPT mostra em
+     * campos separados. "MACIEL, L. S. C." (forma de citacao) vira sobrenome
+     * MACIEL e prenome L. S. C.; sem virgula, o ultimo nome e o sobrenome.
+     * Antes o nome inteiro ia para surName.
+     */
+    internal fun personName(name: String): Pair<String, String> {
+        val clean = name.trim().replace(Regex("\\s+"), " ")
+        val comma = clean.indexOf(',')
+        if (comma > 0) return clean.substring(comma + 1).trim() to clean.substring(0, comma).trim()
+        val space = clean.lastIndexOf(' ')
+        return if (space > 0) clean.substring(0, space) to clean.substring(space + 1) else "" to clean
+    }
+
+    /**
      * Parte responsavel (creator, metadataProvider, contact). O EML exige ao
      * menos pessoa ou organizacao; se o projeto nao informar nenhuma das duas,
      * o titulo do conjunto entra como organizacao para o arquivo continuar valido.
@@ -241,7 +255,10 @@ object DarwinCoreArchive {
     private fun party(tag: String, m: ArchiveMetadata): String = buildString {
         append("    <").append(tag).append(">\n")
         if (m.creatorName.isNotBlank()) {
-            append("      <individualName><surName>").append(xml(m.creatorName)).append("</surName></individualName>\n")
+            val (given, surname) = personName(m.creatorName)
+            append("      <individualName>")
+            if (given.isNotBlank()) append("<givenName>").append(xml(given)).append("</givenName>")
+            append("<surName>").append(xml(surname)).append("</surName></individualName>\n")
         }
         val organization = m.organization.ifBlank { if (m.creatorName.isBlank()) m.datasetTitle else "" }
         if (organization.isNotBlank()) {

@@ -1096,7 +1096,7 @@ private class ExportPackage(
         // a da expedicao (ou UTC) e a hora local: um registro noturno ganhava um
         // instante que nao existiu.
         val local = java.time.Instant.ofEpochMilli(media.createdAt).atZone(java.time.ZoneId.systemDefault())
-        val date = if (media.captureTimeKnown) local.toLocalDate().toString() else "SEM-DATA"
+        val date = if (media.captureTimeKnown) local.toLocalDate().toString() else say("SEM-DATA", "NO-DATE", "SIN-FECHA")
         val time = if (media.captureTimeKnown) DateTimeFormatter.ofPattern("HHmm", Locale.US).format(local.toLocalTime()) else ""
         val area = projectAcronym(project.name)
         val expedition = shortCode(session?.name.orEmpty()).ifBlank { "EXPEDICAO" }

@@ -14,7 +14,9 @@ import android.media.MediaRecorder
 import android.os.Build
 import com.oikos.fieldbook.services.AudioInfo
 import com.oikos.fieldbook.services.AudioInfoReader
+import com.oikos.fieldbook.services.AudioRecordingDate
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -714,9 +716,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     .copy(captureTimeKnown = metadata?.capturedAt != null)
                 if (type == "audio") {
                     val info = withContext(Dispatchers.IO) { importedAudioInfo(file) }
-                    // Data gravada no proprio arquivo (M4A/MP4 de gravador),
-                    // quando existe; senao fica o momento da importacao.
-                    val recordedAt = withContext(Dispatchers.IO) { embeddedAudioDate(file) }
+                    // Data gravada no proprio arquivo (M4A/MP4; WAV com BWF, GUANO ou
+                    // AudioMoth) ou no nome que o gravador deu (Sony: 251220_1847.wav);
+                    // sem nenhuma delas, fica marcada como desconhecida.
+                    val originalName = withContext(Dispatchers.IO) { displayName(uri) }
+                    val recordedAt = withContext(Dispatchers.IO) { embeddedAudioDate(file) ?: AudioRecordingDate.find(file, originalName) }
                     entity = entity.copy(
                         durationMillis = info?.durationMillis,
                         sampleRateHz = info?.sampleRateHz,
@@ -1504,6 +1508,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
     }
+
+    /** Nome do arquivo como estava no outro app (o gravador costuma pôr a data nele). */
+    private fun displayName(uri: Uri): String? = runCatching {
+        getApplication<Application>().contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else null
+        }
+    }.getOrNull()
 
     /**
      * Data de gravacao guardada no arquivo ("20261017T083000.000Z"), em UTC.

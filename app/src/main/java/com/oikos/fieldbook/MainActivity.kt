@@ -3515,7 +3515,10 @@ private fun MediaCaptureControls(
             file.delete()
         }
     }
-    val importPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    // Seletor de arquivos, nao o de fotos: no Android 14+ o GetContent abre o
+    // seletor de fotos, que entrega a imagem com o GPS do EXIF zerado. Pelo
+    // seletor de arquivos o GPS chega inteiro, sem permissao extra.
+    val importPhoto = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val baseName = mediaBaseName(project, session, occurrenceForName, mediaSubject, "FOTO")
             viewModel.importMedia(uri, "photo", target, baseName, project.photoQuality, mediaSubject, mediaDescription, onPhotoMetadata)
@@ -3575,7 +3578,7 @@ private fun MediaCaptureControls(
                 if (hasPermission(context, Manifest.permission.CAMERA)) launchCameraCapture()
                 else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
             }) { Icon(Icons.Default.CameraAlt, null); Spacer(Modifier.width(6.dp)); Text(ui("Foto")) }
-            OutlinedButton(onClick = { importPhoto.launch("image/*") }) { Icon(Icons.Default.Photo, null); Spacer(Modifier.width(6.dp)); Text(ui("Anexar foto")) }
+            OutlinedButton(onClick = { importPhoto.launch(arrayOf("image/*")) }) { Icon(Icons.Default.Photo, null); Spacer(Modifier.width(6.dp)); Text(ui("Anexar foto")) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
             Button(
@@ -3993,6 +3996,17 @@ private fun EditMediaDialog(media: MediaEntity, onDismiss: () -> Unit, onSave: (
     var temperature by remember(media.id, media.filePath) { mutableStateOf(media.airTemperature?.let { formatPlain(it) }.orEmpty()) }
     var humidity by remember(media.id, media.filePath) { mutableStateOf(media.relativeHumidity?.let { formatPlain(it) }.orEmpty()) }
     var distance by remember(media.id, media.filePath) { mutableStateOf(media.distanceToSourceMeters?.let { formatPlain(it) }.orEmpty()) }
+    // Data da captura: a pessoa informa quando o arquivo nao trazia (gravador sem
+    // data) ou corrige um relogio errado. So muda o salvo se ela mexer.
+    val captured = remember(media.id, media.createdAt, media.captureTimeKnown) {
+        if (media.captureTimeKnown) Instant.ofEpochMilli(media.createdAt).atZone(ZoneId.systemDefault()) else null
+    }
+    val initialDate = captured?.toLocalDate()?.toString().orEmpty()
+    val initialTime = captured?.let { String.format(Locale.US, "%02d:%02d", it.hour, it.minute) }.orEmpty()
+    var captureDate by remember(media.id, media.filePath) { mutableStateOf(initialDate) }
+    var captureTime by remember(media.id, media.filePath) { mutableStateOf(initialTime) }
+    val needBoth = ui("Informe a data e a hora da captura.")
+    val noFuture = ui("A data da captura não pode estar no futuro.")
     var problem by remember(media.id) { mutableStateOf<String?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -4006,6 +4020,11 @@ private fun EditMediaDialog(media: MediaEntity, onDismiss: () -> Unit, onSave: (
                     help = "Exemplos: indivíduo inteiro, construção/vestígio, folha, flor, microhabitat, canto reprodutivo, observação narrada."
                 ) { subject = it }
                 TextInput("Descrição da mídia", description, minLines = 2) { description = it }
+                if (!media.captureTimeKnown) {
+                    Text(ui("O arquivo não trazia a data. Informe quando a foto ou o áudio foi feito."), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                DateInput("Data da captura", captureDate) { captureDate = it }
+                TimeInput("Hora da captura", captureTime) { captureTime = it }
                 if (media.mediaType == "audio") {
                     TextInput("Microfone ou gravador", microphone) { microphone = it }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -4022,8 +4041,24 @@ private fun EditMediaDialog(media: MediaEntity, onDismiss: () -> Unit, onSave: (
                 // Antes "22 °C" virava vazio e apagava a temperatura ja salva.
                 problem = if (media.mediaType == "audio") conditionsProblem(temperature, humidity, distance) else null
                 if (problem != null) return@TextButton
+                val dateChanged = captureDate != initialDate || captureTime != initialTime
+                if (dateChanged && (captureDate.isBlank() || captureTime.isBlank())) {
+                    problem = needBoth
+                    return@TextButton
+                }
+                val newCapture = if (dateChanged) {
+                    runCatching {
+                        LocalDate.parse(captureDate).atTime(LocalTime.parse(captureTime)).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                    }.getOrNull()
+                } else null
+                if (newCapture != null && newCapture > System.currentTimeMillis() + 60_000L) {
+                    problem = noFuture
+                    return@TextButton
+                }
                 onSave(
                     media.copy(
+                        createdAt = newCapture ?: media.createdAt,
+                        captureTimeKnown = media.captureTimeKnown || newCapture != null,
                         mediaSubject = subject.trim(),
                         caption = description.trim(),
                         notes = description.trim(),

@@ -215,6 +215,11 @@ class OikosExporterTest {
         val row = midias.first().split(',').zip(midias[1].split(',')).toMap()
         assertEquals("", row["capturedAt"])
         assertTrue(zip.keys.toString(), zip.keys.any { it.contains("05_midias/audios/SEM-DATA_") })
+        // O rotulo segue a lingua do projeto, como o resto da exportacao.
+        val english = readZip(export(ExportFormat.Zip, listOf(occurrence(1)), listOf(media), exportProject = project.copy(csvStyle = "intl", language = "en"))).keys
+        assertTrue(english.toString(), english.any { it.contains("/NO-DATE_") } && english.none { it.contains("SEM-DATA") })
+        val spanish = readZip(export(ExportFormat.Zip, listOf(occurrence(1)), listOf(media), exportProject = project.copy(csvStyle = "intl", language = "es"))).keys
+        assertTrue(spanish.toString(), spanish.any { it.contains("/SIN-FECHA_") })
     }
 
     @Test
