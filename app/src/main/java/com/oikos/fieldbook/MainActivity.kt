@@ -1398,17 +1398,21 @@ private fun AnalysisScreen(viewModel: AppViewModel, projectId: Long, modifier: M
         val projectName = project?.name.orEmpty()
         Column(Modifier.padding(padding).fillMaxSize()) {
             if (current.recordsUsed > 0) {
-                PrimaryScrollableTabRow(selectedTabIndex = tab, edgePadding = 16.dp) {
-                    AnalysisTab.entries.forEachIndexed { index, entry ->
-                        Tab(
-                            selected = tab == index,
-                            onClick = { tab = index },
-                            text = { Text(ui(entry.title)) },
-                            selectedContentColor = MaterialTheme.colorScheme.primary,
-                            unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                // A faixa com rolagem so pinta ate a ultima aba: o fundo e a linha vem de fora, na largura toda.
+                Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
+                    PrimaryScrollableTabRow(selectedTabIndex = tab, edgePadding = 16.dp, divider = {}) {
+                        AnalysisTab.entries.forEachIndexed { index, entry ->
+                            Tab(
+                                selected = tab == index,
+                                onClick = { tab = index },
+                                text = { Text(ui(entry.title)) },
+                                selectedContentColor = MaterialTheme.colorScheme.primary,
+                                unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
+                HorizontalDivider()
             }
             // Uma lista por aba: trocar de aba volta ao topo, em vez de herdar a rolagem da outra.
             key(tab) {
