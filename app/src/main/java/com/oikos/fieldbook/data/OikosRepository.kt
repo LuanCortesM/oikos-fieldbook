@@ -11,6 +11,7 @@ class OikosRepository(private val db: OikosDatabase) {
     fun observeSessions(projectId: Long): Flow<List<SessionEntity>> = db.sessionDao().observeForProject(projectId)
     fun observeSession(id: Long): Flow<SessionEntity?> = db.sessionDao().observeSession(id)
     fun observeOccurrences(sessionId: Long): Flow<List<OccurrenceEntity>> = db.occurrenceDao().observeForSession(sessionId)
+    fun observeProjectOccurrences(projectId: Long): Flow<List<OccurrenceEntity>> = db.occurrenceDao().observeForProject(projectId)
     fun observeOccurrence(id: Long): Flow<OccurrenceEntity?> = db.occurrenceDao().observeOccurrence(id)
     fun observeSessionMedia(sessionId: Long): Flow<List<MediaEntity>> = db.mediaDao().observeForSession(sessionId)
     fun observeOccurrenceMedia(occurrenceId: Long): Flow<List<MediaEntity>> = db.mediaDao().observeForOccurrence(occurrenceId)

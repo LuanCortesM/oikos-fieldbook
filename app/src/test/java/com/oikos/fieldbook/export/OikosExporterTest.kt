@@ -137,6 +137,101 @@ class OikosExporterTest {
         assertTrue(sheet.contains("<v>3</v>"))
     }
 
+    private val doisTaxons get() = listOf(occurrence(1) { copy(individualCount = 2) }, occurrence(2) { copy(scientificName = "Rhinella ornata") })
+
+    /** Todas as partes do .xlsx como texto. */
+    private fun xlsxParts(file: File): Map<String, String> = ZipFile(file).use { zip ->
+        zip.entries().toList().associate { it.name to zip.getInputStream(it).readBytes().toString(Charsets.UTF_8) }
+    }
+
+    private fun sheetNames(parts: Map<String, String>) =
+        Regex("<sheet name=\"([^\"]+)\"").findAll(parts.getValue("xl/workbook.xml")).map { it.groupValues[1] }.toList()
+
+    private fun sheetXml(parts: Map<String, String>, name: String) = parts.getValue("xl/worksheets/sheet${sheetNames(parts).indexOf(name) + 1}.xml")
+
+    @Test
+    fun tresAbasDeAnaliseNoFimSemMudarAPosicaoDasOutras() {
+        val names = sheetNames(xlsxParts(export(ExportFormat.Xlsx, doisTaxons)))
+        assertEquals(listOf("Projeto", "Expedições", "Ocorrências_DarwinCore"), names.take(3))
+        assertEquals(listOf("Resumo_Exportação", "Análise_Táxons", "Análise_Expedições", "Análise_Tempo"), names.takeLast(4))
+        assertEquals(12, names.size)
+    }
+
+    @Test
+    fun zipNaoGanhaPastaNemCsvDeAnalise() {
+        // A analise fica so nas abas do XLSX: o ZIP tem a mesma estrutura de antes.
+        val entries = readZip(export(ExportFormat.Zip, doisTaxons, exportProject = project.copy(csvStyle = "br"))).keys
+        assertFalse(entries.toString(), entries.any { it.contains("06_") || it.contains("analise") || it.contains("analysis") })
+        val folders = entries.mapNotNull { it.split('/').getOrNull(1)?.takeIf { part -> part.matches(Regex("\\d\\d_.*")) } }.toSet()
+        assertEquals(setOf("01_planilha_principal", "02_tabelas_de_apoio", "03_sig_qgis", "04_darwin_core_archive"), folders)
+    }
+
+    @Test
+    fun abaDeTaxonsTemAMatrizEAsFamiliasEmbaixo() {
+        val familias = doisTaxons.mapIndexed { index, record ->
+            record.copy(dynamicFieldsJson = if (index == 0) """{"family":"Hylidae"}""" else """{"family":"Bufonidae"}""")
+        }
+        val taxa = sheetXml(xlsxParts(export(ExportFormat.Xlsx, familias)), "Análise_Táxons")
+        val titles = Regex("s=\"7\" t=\"inlineStr\"><is><t>([^<]+)</t>").findAll(taxa).map { it.groupValues[1] }.toList()
+        assertEquals(listOf("Táxons por expedição", "Táxons por família"), titles)
+        assertTrue(taxa, taxa.contains("<t>Constante</t>"))
+        assertTrue(taxa, taxa.contains("<v>66.67</v>"))
+        assertFalse("tabela com titulo nao fixa o cabecalho", taxa.contains("<pane"))
+    }
+
+    @Test
+    fun analiseSaiNaLinguaDoProjeto() {
+        val english = xlsxParts(export(ExportFormat.Xlsx, doisTaxons, exportProject = project.copy(language = "en")))
+        assertEquals(listOf("Analysis_Taxa", "Analysis_Expeditions", "Analysis_Time"), sheetNames(english).takeLast(3))
+        val expeditions = sheetXml(english, "Analysis_Expeditions")
+        listOf("By expedition", "Cumulative richness", "Effective number (exp H')".replace("'", "&apos;"), "How to read").forEach {
+            assertTrue(it, expeditions.contains(it))
+        }
+        assertTrue(english.getValue("xl/charts/chart1.xml").contains("Collector&apos;s curve"))
+        val spanish = xlsxParts(export(ExportFormat.Xlsx, doisTaxons, exportProject = project.copy(language = "es")))
+        assertEquals(listOf("Análisis_Taxones", "Análisis_Salidas", "Análisis_Tiempo"), sheetNames(spanish).takeLast(3))
+        assertTrue(sheetXml(spanish, "Análisis_Tiempo").contains("<t>Por mes</t>"))
+    }
+
+    @Test
+    fun xlsxComEstiloEGraficoTemTodasAsPartesValidas() {
+        val parts = xlsxParts(export(ExportFormat.Xlsx, doisTaxons + occurrence(3) { copy(scientificName = "Aplastodiscus arildae (Cruz & Peixoto, 1987)") }))
+        // XML mal formado faz o Excel recusar ou "reparar" o arquivo.
+        val builder = javax.xml.parsers.DocumentBuilderFactory.newInstance().apply { isNamespaceAware = true }.newDocumentBuilder()
+        parts.filterKeys { it.endsWith(".xml") || it.endsWith(".rels") }.forEach { (name, text) ->
+            builder.parse(text.byteInputStream())
+            assertFalse(name, text.isBlank())
+        }
+        val types = parts.getValue("[Content_Types].xml")
+        listOf("/xl/styles.xml", "/xl/charts/chart1.xml", "/xl/drawings/drawing1.xml").forEach { assertTrue(it, types.contains(it)) }
+        assertTrue(parts.getValue("xl/_rels/workbook.xml.rels").contains("Target=\"styles.xml\""))
+
+        val names = sheetNames(parts)
+        val expeditions = "xl/worksheets/sheet${names.indexOf("Análise_Expedições") + 1}.xml"
+        assertTrue(parts.getValue(expeditions).contains("<drawing r:id=\"rId1\"/>"))
+        assertTrue(parts.getValue(expeditions.replace("worksheets/", "worksheets/_rels/") + ".rels").contains("../drawings/drawing1.xml"))
+        // Titulo na linha 1, cabecalho na 2: a curva le da linha 3 em diante.
+        val chart = parts.getValue("xl/charts/chart1.xml")
+        assertTrue(chart, chart.contains("&apos;Análise_Expedições&apos;!\$H\$3:\$H\$3"))
+        assertTrue(chart, chart.contains("&apos;Análise_Expedições&apos;!\$H\$2<"))
+        assertTrue(chart, chart.contains("Curva do coletor"))
+
+        // Cabecalho laranja em toda aba; italico so no genero e epiteto da analise.
+        val occurrencesSheet = sheetXml(parts, "Ocorrências_DarwinCore")
+        assertTrue(occurrencesSheet.contains("<c r=\"A1\" s=\"1\""))
+        assertTrue(occurrencesSheet.contains("<pane ySplit=\"1\""))
+        val taxa = sheetXml(parts, "Análise_Táxons")
+        assertTrue(taxa, taxa.contains("<i/><sz val=\"11\"/></rPr><t xml:space=\"preserve\">Aplastodiscus arildae</t>"))
+        assertTrue(taxa, taxa.contains("<t xml:space=\"preserve\"> (Cruz &amp; Peixoto, 1987)</t>"))
+        assertFalse("italico so na analise", occurrencesSheet.contains("<i/>"))
+    }
+
+    @Test
+    fun analiseNaoMudaAPlanilhaDeOcorrencias() {
+        val semAnalise = csvRows(export(ExportFormat.Csv, doisTaxons))
+        assertEquals(listOf("2", ""), semAnalise.map { it["individualCount"] })
+    }
+
     @Test
     fun archiveLevaTermosDarwinCoreNoCoreESemCaminhoDoZip() {
         val subespecie = occurrence(1) {

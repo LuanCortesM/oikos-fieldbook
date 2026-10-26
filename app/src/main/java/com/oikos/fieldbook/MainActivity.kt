@@ -45,6 +45,26 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.runtime.produceState
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.ShowChart
+import androidx.compose.material.icons.filled.TableChart
+import com.oikos.fieldbook.export.ScientificName
+import com.oikos.fieldbook.export.TaxonAnalysis
+import com.oikos.fieldbook.ui.CollectorCurveChart
+import com.oikos.fieldbook.ui.AnalysisBarChart
+import com.oikos.fieldbook.ui.RankAbundanceChart
+import com.oikos.fieldbook.ui.SimilarityHeatmap
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.material3.PrimaryScrollableTabRow
+import androidx.compose.material3.Tab
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -124,6 +144,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
@@ -510,6 +531,7 @@ private val ScreenSaver: Saver<Screen, Any> = listSaver(
             is Screen.OccurrenceEdit -> listOf("occurrenceEdit", tela.projectId, tela.sessionId, tela.occurrenceId)
             is Screen.Media -> listOf("media", tela.projectId, tela.sessionId, tela.occurrenceId)
             is Screen.Export -> listOf("export", tela.projectId, tela.sessionId)
+            is Screen.Analysis -> listOf("analysis", tela.projectId)
             is Screen.Settings -> listOf("settings")
             is Screen.About -> listOf("about")
             is Screen.Checklists -> listOf("checklists")
@@ -530,6 +552,7 @@ private val ScreenSaver: Saver<Screen, Any> = listSaver(
             "occurrenceEdit" -> Screen.OccurrenceEdit(longEm(1), longEm(2), longOpcional(3))
             "media" -> Screen.Media(longEm(1), longEm(2), longOpcional(3))
             "export" -> Screen.Export(longEm(1), longOpcional(2))
+            "analysis" -> Screen.Analysis(longEm(1))
             "settings" -> Screen.Settings
             "about" -> Screen.About
             "checklists" -> Screen.Checklists
@@ -550,6 +573,7 @@ private sealed interface Screen {
     data class OccurrenceEdit(val projectId: Long, val sessionId: Long, val occurrenceId: Long? = null) : Screen
     data class Media(val projectId: Long, val sessionId: Long, val occurrenceId: Long? = null) : Screen
     data class Export(val projectId: Long, val sessionId: Long? = null) : Screen
+    data class Analysis(val projectId: Long) : Screen
     data object Settings : Screen
     data object About : Screen
     data object Checklists : Screen
@@ -654,6 +678,7 @@ private fun OikosApp(
                 onNewSession = { screen = Screen.SessionEdit(current.projectId) },
                 onOpenSession = { screen = Screen.SessionDetail(current.projectId, it) },
                 onExport = { screen = Screen.Export(current.projectId) },
+                onAnalysis = { screen = Screen.Analysis(current.projectId) },
                 onDeleted = { screen = Screen.Projects }
             )
             is Screen.FieldConfig -> FieldConfigScreen(viewModel, current.projectId, screenModifier) {
@@ -687,6 +712,12 @@ private fun OikosApp(
                 warning?.let { scope.launch { snackbarHostState.showSnackbar(inUiLanguage(it)) } }
                 context.startActivity(Intent.createChooser(intent, shareChooserTitle))
             }
+            is Screen.Analysis -> AnalysisScreen(viewModel, current.projectId, screenModifier, onBack = {
+                screen = Screen.ProjectDetail(current.projectId)
+            }) { intent, warning ->
+                warning?.let { scope.launch { snackbarHostState.showSnackbar(inUiLanguage(it)) } }
+                context.startActivity(Intent.createChooser(intent, shareChooserTitle))
+            }
             Screen.Settings -> SettingsScreen(viewModel, darkTheme, simpleMode, languageMode, onThemeChange, onSimpleModeChange, onLanguageModeChange, screenModifier, onChecklists = { screen = Screen.Checklists }, onTrash = { screen = Screen.Trash }) { screen = Screen.Projects }
             Screen.Checklists -> ChecklistsScreen(viewModel, screenModifier) { screen = Screen.Settings }
             Screen.Trash -> TrashScreen(viewModel, screenModifier) { screen = Screen.Settings }
@@ -709,6 +740,7 @@ private fun Screen.backDestination(): Screen = when (this) {
     is Screen.OccurrenceEdit -> Screen.SessionDetail(projectId, sessionId)
     is Screen.Media -> if (occurrenceId == null) Screen.SessionDetail(projectId, sessionId) else Screen.OccurrenceEdit(projectId, sessionId, occurrenceId)
     is Screen.Export -> sessionId?.let { Screen.SessionDetail(projectId, it) } ?: Screen.ProjectDetail(projectId)
+    is Screen.Analysis -> Screen.ProjectDetail(projectId)
     Screen.Settings -> Screen.Projects
     Screen.About -> Screen.Projects
     Screen.Checklists -> Screen.Settings
@@ -1199,10 +1231,15 @@ private fun ProjectDetailScreen(
     onNewSession: () -> Unit,
     onOpenSession: (Long) -> Unit,
     onExport: () -> Unit,
+    onAnalysis: () -> Unit,
     onDeleted: () -> Unit
 ) {
     val project by remember(viewModel, projectId) { viewModel.observeProject(projectId) }.collectAsState(initial = null)
     val sessions by remember(viewModel, projectId) { viewModel.observeSessions(projectId) }.collectAsState(initial = emptyList())
+    val occurrences by remember(viewModel, projectId) { viewModel.observeProjectOccurrences(projectId) }.collectAsState(initial = emptyList())
+    val analysis by produceState<TaxonAnalysis?>(null, sessions, occurrences) {
+        value = withContext(Dispatchers.Default) { TaxonAnalysis(sessions, occurrences) }
+    }
     var deleteProject by remember { mutableStateOf(false) }
     var sessionToDelete by remember { mutableStateOf<SessionEntity?>(null) }
     if (deleteProject) {
@@ -1247,6 +1284,8 @@ private fun ProjectDetailScreen(
                 Text(ui("Expedições"), style = MaterialTheme.typography.titleLarge)
                 Text("${sessions.size} ${ui(if (sessions.size == 1) "expedição" else "expedições")} - Datum ${project?.defaultDatum ?: "SIRGAS 2000"}")
             }
+            // So aparece quando ha registro: sem dado nao ha o que analisar.
+            if (occurrences.isNotEmpty()) item { AnalysisEntryCard(analysis, onAnalysis) }
             if (sessions.isEmpty()) item { EmptyState("Sem expedições.", "Crie uma expedição para agrupar as ocorrências de campo.") }
             items(sessions) { session ->
                 Card(Modifier.fillMaxWidth()) {
@@ -1270,6 +1309,785 @@ private fun ProjectDetailScreen(
             }
         }
     }
+}
+
+/** Entrada da analise na tela do projeto, ja com o resumo. */
+@Composable
+private fun AnalysisEntryCard(analysis: TaxonAnalysis?, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    Card(
+        Modifier.fillMaxWidth(),
+        border = BorderStroke(1.5.dp, colors.primary),
+        colors = CardDefaults.cardColors(containerColor = colors.primary.copy(alpha = 0.08f))
+    ) {
+        Row(
+            Modifier.fillMaxWidth().clickable(onClick = onClick).padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Box(Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(colors.primary), contentAlignment = Alignment.Center) {
+                Icon(Icons.AutoMirrored.Filled.ShowChart, null, tint = colors.onPrimary)
+            }
+            Column(Modifier.weight(1f)) {
+                Text(ui("Análise do projeto"), style = MaterialTheme.typography.titleMedium)
+                if (analysis != null) {
+                    val taxa = analysis.taxa.size
+                    val individuals = analysis.totalIndividuals
+                    val expeditions = analysis.expeditions.size
+                    Text(
+                        tr(
+                            "$taxa ${if (taxa == 1) "táxon" else "táxons"} · $individuals ${if (individuals == 1) "indivíduo" else "indivíduos"} · $expeditions ${if (expeditions == 1) "expedição" else "expedições"}",
+                            "$taxa ${if (taxa == 1) "taxon" else "taxa"} · $individuals ${if (individuals == 1) "individual" else "individuals"} · $expeditions ${if (expeditions == 1) "expedition" else "expeditions"}",
+                            "$taxa ${if (taxa == 1) "taxón" else "taxones"} · $individuals ${if (individuals == 1) "individuo" else "individuos"} · $expeditions ${if (expeditions == 1) "salida" else "salidas"}"
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.onSurfaceVariant
+                    )
+                }
+            }
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = colors.primary)
+        }
+    }
+}
+
+/** Taxons mostrados antes de "Mostrar todos": projeto grande tem centenas. */
+private const val ANALYSIS_TAXA_PREVIEW = 30
+
+/** Abas da analise: cada analise no seu lugar, para a tela nao virar uma lista sem fim. */
+private enum class AnalysisTab(val title: String) {
+    SUMMARY("Resumo"), TAXA("Táxons"), DIVERSITY("Diversidade"), TIME("Tempo")
+}
+
+/**
+ * Analise do projeto, em abas: resumo e curva do coletor; taxons com
+ * dominancia, constancia e perfil; diversidade e similaridade; familias;
+ * meses e horarios. O calculo e o mesmo das abas de analise da exportacao
+ * (TaxonAnalysis), entao o app e a planilha mostram sempre os mesmos numeros.
+ * Nenhum registro muda.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AnalysisScreen(viewModel: AppViewModel, projectId: Long, modifier: Modifier, onBack: () -> Unit, onShare: (Intent, String?) -> Unit) {
+    val project by remember(viewModel, projectId) { viewModel.observeProject(projectId) }.collectAsState(initial = null)
+    val sessions by remember(viewModel, projectId) { viewModel.observeSessions(projectId) }.collectAsState(initial = null)
+    val occurrences by remember(viewModel, projectId) { viewModel.observeProjectOccurrences(projectId) }.collectAsState(initial = null)
+    val exporting by viewModel.exporting.collectAsState()
+    // Fora da thread principal: projeto grande tem milhares de registros.
+    val analysis by produceState<TaxonAnalysis?>(null, sessions, occurrences) {
+        val loadedSessions = sessions ?: return@produceState
+        val loadedOccurrences = occurrences ?: return@produceState
+        value = withContext(Dispatchers.Default) { TaxonAnalysis(loadedSessions, loadedOccurrences) }
+    }
+    var tab by rememberSaveable { mutableIntStateOf(0) }
+    Scaffold(
+        modifier = modifier,
+        topBar = {
+            OikosTopBar("Análise", onBack) {
+                IconButton(
+                    onClick = { viewModel.exportProject(projectId, ExportFormat.Xlsx, ExportContent.SpreadsheetsOnly, onShare) },
+                    enabled = !exporting
+                ) { Icon(Icons.Default.Share, ui("Exportar planilha (XLSX)")) }
+            }
+        }
+    ) { padding ->
+        val current = analysis
+        if (current == null) {
+            Box(Modifier.padding(padding).fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            return@Scaffold
+        }
+        val projectName = project?.name.orEmpty()
+        Column(Modifier.padding(padding).fillMaxSize()) {
+            if (current.recordsUsed > 0) {
+                PrimaryScrollableTabRow(selectedTabIndex = tab, edgePadding = 16.dp) {
+                    AnalysisTab.entries.forEachIndexed { index, entry ->
+                        Tab(
+                            selected = tab == index,
+                            onClick = { tab = index },
+                            text = { Text(ui(entry.title)) },
+                            selectedContentColor = MaterialTheme.colorScheme.primary,
+                            unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+            // Uma lista por aba: trocar de aba volta ao topo, em vez de herdar a rolagem da outra.
+            key(tab) {
+                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (current.recordsUsed == 0) {
+                        item { AnalysisHeader(projectName, current) }
+                        item { EmptyState("Nada para analisar ainda.", "Entram os registros com nome científico, menos os de ausência.") }
+                    } else {
+                        when (AnalysisTab.entries[tab]) {
+                            AnalysisTab.SUMMARY -> analysisSummary(projectName, current)
+                            AnalysisTab.TAXA -> analysisTaxa(current)
+                            AnalysisTab.DIVERSITY -> analysisDiversity(current)
+                            AnalysisTab.TIME -> analysisTime(current)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AnalysisHeader(projectName: String, analysis: TaxonAnalysis) {
+    val language = LocalOikosLanguage.current
+    val count = analysis.expeditions.size
+    val dates = analysis.expeditions.map { it.session.eventDate }.filter { it.isNotBlank() }
+    val period = when {
+        dates.isEmpty() -> ""
+        dates.first() == dates.last() -> " · ${analysisDate(dates.first(), language)}"
+        else -> " · ${analysisDate(dates.first(), language)} ${tr("a", "to", "a")} ${analysisDate(dates.last(), language)}"
+    }
+    Column {
+        Text(projectName, style = MaterialTheme.typography.titleLarge)
+        Text("$count ${ui(if (count == 1) "expedição" else "expedições")}$period")
+    }
+}
+
+/** Cartao das abas: titulo, uma linha que explica e o conteudo. */
+@Composable
+private fun AnalysisCard(title: String, hint: String? = null, content: @Composable ColumnScope.() -> Unit) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Text(ui(title), style = MaterialTheme.typography.titleMedium)
+            if (hint != null) Text(hint, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            content()
+        }
+    }
+}
+
+/** Texto miudo do fim de cada aba: como os numeros foram contados. */
+@Composable
+private fun AnalysisNotes(vararg lines: String) {
+    Column(Modifier.padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        lines.filter { it.isNotBlank() }.forEach {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun AnalysisDivider() = HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+
+/** Barra fina de 0 a 1, laranja sobre trilho apagado. */
+@Composable
+private fun AnalysisBar(fraction: Float, modifier: Modifier = Modifier) {
+    val colors = MaterialTheme.colorScheme
+    Box(modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(colors.onSurface.copy(alpha = 0.12f))) {
+        Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).fillMaxHeight().background(colors.primary))
+    }
+}
+
+private fun LazyListScope.analysisSummary(projectName: String, analysis: TaxonAnalysis) {
+    item { AnalysisHeader(projectName, analysis) }
+    item {
+        val expeditions = analysis.expeditions.size
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                AnalysisStat(analysis.taxa.size.toString(), ui("táxons (riqueza)"), Modifier.weight(1f))
+                AnalysisStat(analysis.totalIndividuals.toString(), ui("indivíduos"), Modifier.weight(1f))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                AnalysisStat(analysis.recordsUsed.toString(), ui("registros"), Modifier.weight(1f))
+                AnalysisStat(expeditions.toString(), ui("expedições"), Modifier.weight(1f))
+            }
+        }
+    }
+    item {
+        val language = LocalOikosLanguage.current
+        val values = analysis.expeditions.map { it.cumulativeRichness }
+        AnalysisCard("Curva do coletor", ui("Táxons acumulados por expedição, em ordem de data.")) {
+            CollectorCurveChart(
+                values = values,
+                labels = analysis.expeditions.mapIndexed { index, expedition -> analysisChartLabel(expedition.session.eventDate, index, language) },
+                description = tr(
+                    "Curva do coletor: ${values.joinToString(", ")} táxons acumulados.",
+                    "Collector's curve: ${values.joinToString(", ")} cumulative taxa.",
+                    "Curva del colector: ${values.joinToString(", ")} taxones acumulados."
+                ),
+                background = CardDefaults.cardColors().containerColor,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            val last = analysis.expeditions.last()
+            if (analysis.expeditions.size > 1) {
+                Text(
+                    if (last.newTaxa == 0) {
+                        tr("A última expedição não trouxe táxon novo.", "The last expedition added no new taxon.", "La última salida de campo no agregó taxones nuevos.")
+                    } else {
+                        tr(
+                            "A última expedição trouxe ${last.newTaxa} ${if (last.newTaxa == 1) "táxon novo" else "táxons novos"}.",
+                            "The last expedition added ${last.newTaxa} new ${if (last.newTaxa == 1) "taxon" else "taxa"}.",
+                            "La última salida de campo agregó ${last.newTaxa} ${if (last.newTaxa == 1) "taxón nuevo" else "taxones nuevos"}."
+                        )
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+    item {
+        val language = LocalOikosLanguage.current
+        AnalysisCard("Por expedição") {
+            analysis.expeditions.forEachIndexed { index, expedition ->
+                if (index > 0) AnalysisDivider()
+                AnalysisExpeditionRow(expedition, language)
+            }
+        }
+    }
+    item {
+        AnalysisNotes(
+            ui("Registros de ausência e sem nome científico ficam de fora. Registro sem contagem vale 1 indivíduo."),
+            analysisLeftOut(
+                analysis.absenceRecords to Triple("de ausência", "marked absent", "de ausencia"),
+                analysis.recordsWithoutName to Triple("sem nome científico", "with no scientific name", "sin nombre científico")
+            ),
+            when (val grouping = analysis.groupingExpeditions) {
+                0 -> ""
+                1 -> tr(
+                    "1 expedição só agrupa outras (parentEventID) e não entra na contagem.",
+                    "1 expedition only groups others (parentEventID) and is not counted.",
+                    "1 salida de campo solo agrupa otras (parentEventID) y no se cuenta."
+                )
+                else -> tr(
+                    "$grouping expedições só agrupam outras (parentEventID) e não entram na contagem.",
+                    "$grouping expeditions only group others (parentEventID) and are not counted.",
+                    "$grouping salidas de campo solo agrupan otras (parentEventID) y no se cuentan."
+                )
+            }
+        )
+    }
+}
+
+private fun LazyListScope.analysisTaxa(analysis: TaxonAnalysis) {
+    val ranked = analysis.taxa.sortedWith(compareByDescending<TaxonAnalysis.Taxon> { it.individuals }.thenBy { it.scientificName.lowercase(Locale.ROOT) })
+    item {
+        val language = LocalOikosLanguage.current
+        val percents = ranked.map { analysis.relativeAbundancePercent(it) }
+        AnalysisCard("Dominância", ui("Abundância relativa por táxon, em escala logarítmica.")) {
+            RankAbundanceChart(
+                percents = percents,
+                description = tr(
+                    "Rank-abundância de ${ranked.size} táxons.",
+                    "Rank-abundance of ${ranked.size} taxa.",
+                    "Rango-abundancia de ${ranked.size} taxones."
+                ),
+                background = CardDefaults.cardColors().containerColor,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            ranked.firstOrNull()?.takeIf { it.individuals > 0 }?.let { top ->
+                val share = analysisPercent(percents.first(), language)
+                Text(
+                    buildAnnotatedString {
+                        append(tr("O mais abundante é ", "The most abundant is ", "El más abundante es "))
+                        append(scientificNameText(top.scientificName))
+                        append(tr(", com $share dos indivíduos.", ", with $share of the individuals.", ", con el $share de los individuos."))
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+    if (analysis.families.isNotEmpty()) item { AnalysisFamiliesCard(analysis) }
+    item {
+        var showAll by rememberSaveable { mutableStateOf(false) }
+        val expanded = remember { mutableStateMapOf<String, Boolean>() }
+        val classes = ranked.groupingBy { analysis.constancy(it) }.eachCount()
+        val shown = if (showAll) ranked else ranked.take(ANALYSIS_TAXA_PREVIEW)
+        AnalysisCard("Táxons", ui("Toque num táxon para ver os detalhes.")) {
+            // So as classes que aparecem, no singular ou no plural: "Constância: 2 constantes · 5 acidentais".
+            val parts = TaxonAnalysis.Constancy.entries.mapNotNull { constancy ->
+                val count = classes[constancy] ?: return@mapNotNull null
+                val many = count > 1
+                "$count " + when (constancy) {
+                    TaxonAnalysis.Constancy.CONSTANT -> tr(if (many) "constantes" else "constante", "constant", if (many) "constantes" else "constante")
+                    TaxonAnalysis.Constancy.ACCESSORY -> tr(if (many) "acessórias" else "acessória", "accessory", if (many) "accesorias" else "accesoria")
+                    TaxonAnalysis.Constancy.ACCIDENTAL -> tr(if (many) "acidentais" else "acidental", "accidental", if (many) "accidentales" else "accidental")
+                }
+            }
+            Text(
+                "${ui("Constância")}: ${parts.joinToString(" · ")}",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)
+            )
+            shown.forEachIndexed { index, taxon ->
+                if (index > 0) AnalysisDivider()
+                AnalysisTaxonRow(taxon, analysis, expanded[taxon.scientificName] == true) {
+                    expanded[taxon.scientificName] = expanded[taxon.scientificName] != true
+                }
+            }
+            if (ranked.size > ANALYSIS_TAXA_PREVIEW) {
+                TextButton(onClick = { showAll = !showAll }) {
+                    Text(if (showAll) ui("Mostrar menos") else tr("Mostrar todos (${ranked.size})", "Show all (${ranked.size})", "Mostrar todos (${ranked.size})"))
+                }
+            }
+        }
+    }
+    item {
+        AnalysisNotes(
+            ui("Constância (Dajoz): constante em mais de 50% das expedições, acessória de 25% a 50%, acidental abaixo de 25%."),
+            ui("Abundância relativa = indivíduos do táxon ÷ total de indivíduos."),
+            if (analysis.families.isEmpty()) ui("Nenhum registro tem família. Ela vem junto quando o nome sai do checklist.")
+            else ui("A família é a do registro; vem junto quando o nome sai do checklist."),
+            when (val withoutFamily = if (analysis.families.isEmpty()) 0 else analysis.taxaWithoutFamily) {
+                0 -> ""
+                1 -> tr(
+                    "1 táxon sem família fica fora da lista por família.",
+                    "1 taxon with no family is left out of the family list.",
+                    "1 taxón sin familia queda fuera de la lista por familia."
+                )
+                else -> tr(
+                    "$withoutFamily táxons sem família ficam fora da lista por família.",
+                    "$withoutFamily taxa with no family are left out of the family list.",
+                    "$withoutFamily taxones sin familia quedan fuera de la lista por familia."
+                )
+            }
+        )
+    }
+}
+
+private fun LazyListScope.analysisDiversity(analysis: TaxonAnalysis) {
+    item {
+        val language = LocalOikosLanguage.current
+        val diversity = analysis.diversity
+        AnalysisCard("Índices do projeto") {
+            if (diversity == null) {
+                val missing = analysis.recordsWithoutCount
+                Text(
+                    if (missing == 1) tr(
+                        "Falta a contagem de indivíduos em 1 registro. Os índices precisam dela em todos.",
+                        "1 record has no individual count. The indices need it in every record.",
+                        "Falta el conteo de individuos en 1 registro. Los índices lo necesitan en todos."
+                    ) else tr(
+                        "Falta a contagem de indivíduos em $missing registros. Os índices precisam dela em todos.",
+                        "$missing records have no individual count. The indices need it in every record.",
+                        "Falta el conteo de individuos en $missing registros. Los índices lo necesitan en todos."
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
+            } else {
+                Column(Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        AnalysisStat(analysisNumber(diversity.shannon, 2, language), "Shannon (H')", Modifier.weight(1f), inner = true)
+                        AnalysisStat(analysisNumber(diversity.simpson, 2, language), "Simpson (1−D)", Modifier.weight(1f), inner = true)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        AnalysisStat(diversity.pielou?.let { analysisNumber(it, 2, language) } ?: "—", "Pielou (J')", Modifier.weight(1f), inner = true)
+                        AnalysisStat(analysisNumber(diversity.bergerParker, 2, language), "Berger-Parker (d)", Modifier.weight(1f), inner = true)
+                    }
+                    Text(
+                        tr(
+                            "Equivale a ${analysisNumber(diversity.effectiveShannon, 1, language)} espécies igualmente abundantes (exp H').",
+                            "Equivalent to ${analysisNumber(diversity.effectiveShannon, 1, language)} equally abundant species (exp H').",
+                            "Equivale a ${analysisNumber(diversity.effectiveShannon, 1, language)} especies igualmente abundantes (exp H')."
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+    item {
+        val language = LocalOikosLanguage.current
+        AnalysisCard("Por expedição") {
+            analysis.expeditions.forEachIndexed { index, expedition ->
+                if (index > 0) AnalysisDivider()
+                Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text(expedition.session.name.ifBlank { expedition.session.eventId }, style = MaterialTheme.typography.bodyLarge)
+                        Text(analysisDateOrNone(expedition.session.eventDate, language), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    val diversity = expedition.diversity
+                    Column(horizontalAlignment = Alignment.End) {
+                        if (diversity == null) {
+                            Text("—", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                if (expedition.records == 0) ui("sem registros") else ui("falta contagem"),
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            Text(
+                                "H' ${analysisNumber(diversity.shannon, 2, language)} · 1−D ${analysisNumber(diversity.simpson, 2, language)}",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                "J' ${diversity.pielou?.let { analysisNumber(it, 2, language) } ?: "—"} · d ${analysisNumber(diversity.bergerParker, 2, language)}",
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (analysis.expeditions.size >= 2) item { AnalysisSimilarityCard(analysis) }
+    item {
+        AnalysisNotes(
+            ui("Índices com logaritmo natural, como no pacote vegan do R."),
+            ui("H' sobe com mais táxons e abundâncias parecidas. 1−D: chance de dois indivíduos sorteados serem de táxons diferentes. J': de 0 a 1; perto de 1, abundâncias parecidas. d: fração do táxon mais abundante."),
+            ui("Onde falta contagem de indivíduos, o índice fica sem valor (—).")
+        )
+    }
+}
+
+@Composable
+private fun AnalysisSimilarityCard(analysis: TaxonAnalysis) {
+    val language = LocalOikosLanguage.current
+    var index by rememberSaveable { mutableIntStateOf(0) }
+    val names = listOf("Jaccard", "Sørensen", "Bray-Curtis")
+    val count = analysis.expeditions.size
+    val matrix = remember(analysis, index) {
+        List(count) { row ->
+            List(count) { column ->
+                if (column >= row) null else analysis.similarity(row, column).let {
+                    when (index) {
+                        0 -> it.jaccard
+                        1 -> it.sorensen
+                        else -> it.brayCurtis
+                    }
+                }
+            }
+        }
+    }
+    AnalysisCard("Similaridade entre expedições", ui("De 0 (nada em comum) a 1 (iguais). Jaccard e Sørensen usam só os táxons; Bray-Curtis, os indivíduos.")) {
+        Row(Modifier.padding(top = 8.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            names.forEachIndexed { position, name ->
+                FilterChip(
+                    selected = index == position,
+                    onClick = { index = position },
+                    label = { Text(name) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+                        selectedLabelColor = MaterialTheme.colorScheme.primary
+                    )
+                )
+            }
+        }
+        SimilarityHeatmap(
+            values = matrix,
+            format = { analysisNumber(it, 2, language) },
+            description = tr(
+                "Similaridade de ${names[index]} entre $count expedições.",
+                "${names[index]} similarity between $count expeditions.",
+                "Similitud de ${names[index]} entre $count salidas de campo."
+            ),
+            modifier = Modifier.padding(top = 10.dp)
+        )
+        val best = (1 until count).flatMap { row -> (0 until row).map { column -> Triple(row, column, matrix[row][column]) } }
+            .filter { it.third != null }
+            .maxByOrNull { it.third!! }
+        if (best != null) {
+            Text(
+                tr(
+                    "Mais parecidas: ${best.second + 1} e ${best.first + 1} (${analysisNumber(best.third!!, 2, language)}).",
+                    "Most similar: ${best.second + 1} and ${best.first + 1} (${analysisNumber(best.third!!, 2, language)}).",
+                    "Más parecidas: ${best.second + 1} y ${best.first + 1} (${analysisNumber(best.third!!, 2, language)})."
+                ),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+        } else if (index == 2) {
+            Text(
+                ui("Bray-Curtis precisa da contagem de indivíduos nas duas expedições."),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+        }
+        Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            analysis.expeditions.forEachIndexed { position, expedition ->
+                Text(
+                    "${position + 1}  ${expedition.session.name.ifBlank { expedition.session.eventId }} · ${analysisDateOrNone(expedition.session.eventDate, language)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+/** Composicao por familia, dentro da aba Taxons: so aparece quando algum taxon tem familia. */
+@Composable
+private fun AnalysisFamiliesCard(analysis: TaxonAnalysis) {
+    val most = analysis.families.maxOf { it.taxa }.coerceAtLeast(1)
+    AnalysisCard("Táxons por família") {
+        analysis.families.forEachIndexed { index, family ->
+            if (index > 0) AnalysisDivider()
+            Column(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(family.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                    Text(
+                        tr(
+                            "${family.taxa} ${if (family.taxa == 1) "táxon" else "táxons"} · ${family.individuals} ind.",
+                            "${family.taxa} ${if (family.taxa == 1) "taxon" else "taxa"} · ${family.individuals} ind.",
+                            "${family.taxa} ${if (family.taxa == 1) "taxón" else "taxones"} · ${family.individuals} ind."
+                        ),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+                AnalysisBar(family.taxa.toFloat() / most)
+            }
+        }
+    }
+}
+
+private fun LazyListScope.analysisTime(analysis: TaxonAnalysis) {
+    item {
+        val language = LocalOikosLanguage.current
+        val withData = analysis.months.filter { it.records > 0 || it.expeditions > 0 }
+        AnalysisCard("Por mês", ui("Registros por mês, somando os anos.")) {
+            if (analysis.months.none { it.records > 0 }) {
+                Text(ui("Nenhum registro com data."), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 6.dp))
+            } else {
+                AnalysisBarChart(
+                    values = analysis.months.map { it.records },
+                    labels = analysisMonthNames(language, short = true),
+                    description = tr("Registros por mês.", "Records per month.", "Registros por mes."),
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+                val names = analysisMonthNames(language, short = false)
+                Column(Modifier.padding(top = 4.dp)) {
+                    withData.forEachIndexed { index, month ->
+                        if (index > 0) AnalysisDivider()
+                        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(names[month.value - 1], style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                            Text(
+                                tr(
+                                    "${month.expeditions} exp. · ${month.records} reg. · ${month.richness} ${if (month.richness == 1) "táxon" else "táxons"}",
+                                    "${month.expeditions} exp. · ${month.records} rec. · ${month.richness} ${if (month.richness == 1) "taxon" else "taxa"}",
+                                    "${month.expeditions} sal. · ${month.records} reg. · ${month.richness} ${if (month.richness == 1) "taxón" else "taxones"}"
+                                ),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+    item {
+        AnalysisCard("Horário de atividade", ui("Registros por hora do dia.")) {
+            val peak = analysis.hours.maxOf { it.records }
+            if (peak == 0) {
+                Text(ui("Nenhum registro com hora."), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 6.dp))
+            } else {
+                AnalysisBarChart(
+                    values = analysis.hours.map { it.records },
+                    labels = analysis.hours.map { "${it.value}h" },
+                    description = tr("Registros por hora do dia.", "Records per hour of the day.", "Registros por hora del día."),
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+                // "Mais registros às 19h (5)." ou, com empate, "às 8h, 9h e 19h (2 cada)."
+                val busiest = analysis.hours.filter { it.records == peak }.map { "${it.value}h" }
+                val hours = if (busiest.size == 1) busiest.first() else busiest.dropLast(1).joinToString(", ") + tr(" e ", " and ", " y ") + busiest.last()
+                val each = if (busiest.size == 1) "$peak" else tr("$peak cada", "$peak each", "$peak cada una")
+                Text(
+                    tr("Mais registros às $hours ($each).", "Most records at $hours ($each).", "Más registros a las $hours ($each)."),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        }
+    }
+    item {
+        AnalysisNotes(
+            ui("Mês pela data do registro ou, sem ela, da expedição. Compare com o número de expedições do mês."),
+            ui("Hora pelo campo Hora do registro: 19h reúne de 19:00 a 19:59."),
+            analysisLeftOut(
+                analysis.recordsWithoutDate to Triple("sem data", "with no date", "sin fecha"),
+                analysis.recordsWithoutTime to Triple("sem hora", "with no time", "sin hora")
+            )
+        )
+    }
+}
+
+/**
+ * "Fora: 2 registros de ausência e 1 sem nome científico." Só as partes que
+ * existem, no singular ou no plural; vazio se nada ficou de fora.
+ */
+@Composable
+private fun analysisLeftOut(vararg parts: Pair<Int, Triple<String, String, String>>): String {
+    val present = parts.filter { it.first > 0 }
+    if (present.isEmpty()) return ""
+    val pieces = present.mapIndexed { index, (count, what) ->
+        // O substantivo so na primeira parte: "2 registros sem data e 1 sem hora".
+        val noun = when {
+            index > 0 -> ""
+            count == 1 -> tr("registro ", "record ", "registro ")
+            else -> tr("registros ", "records ", "registros ")
+        }
+        "$count $noun${tr(what.first, what.second, what.third)}"
+    }
+    return tr("Fora: ", "Left out: ", "Fuera: ") + pieces.joinToString(tr(" e ", " and ", " y ")) + "."
+}
+
+@Composable
+private fun AnalysisStat(value: String, label: String, modifier: Modifier, inner: Boolean = false) {
+    val colors = MaterialTheme.colorScheme
+    // Dentro de outro cartao, um tom acima para nao sumir no fundo.
+    val container = if (inner) colors.onSurface.copy(alpha = 0.06f) else CardDefaults.cardColors().containerColor
+    Card(modifier, colors = CardDefaults.cardColors(containerColor = container)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
+            Text(value, style = MaterialTheme.typography.headlineSmall, color = colors.primary)
+            Text(label, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+        }
+    }
+}
+
+/** Uma linha da lista de taxons; tocada, abre constancia, altitude, sexo, fase de vida e expedicoes. */
+@Composable
+private fun AnalysisTaxonRow(taxon: TaxonAnalysis.Taxon, analysis: TaxonAnalysis, expanded: Boolean, onToggle: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val language = LocalOikosLanguage.current
+    val share = analysis.relativeAbundancePercent(taxon)
+    val expeditions = analysis.expeditions.size
+    val constancy = analysisConstancyLabel(analysis.constancy(taxon))
+    Column(Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(scientificNameText(taxon.scientificName), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+            Text("${taxon.individuals} ind. · ${analysisPercent(share, language)}", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                listOf(taxon.family, taxon.vernacularName).filter { it.isNotBlank() }.joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant, modifier = Modifier.weight(1f)
+            )
+            Text(
+                tr(
+                    "${taxon.expeditionsWithTaxon} de $expeditions exp. · ${constancy.lowercase()}",
+                    "${taxon.expeditionsWithTaxon} of $expeditions exp. · ${constancy.lowercase()}",
+                    "${taxon.expeditionsWithTaxon} de $expeditions sal. · ${constancy.lowercase()}"
+                ),
+                style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant
+            )
+        }
+        AnalysisBar((share / 100.0).toFloat(), Modifier.padding(top = 6.dp))
+        AnimatedVisibility(visible = expanded) {
+            Column(Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                AnalysisDetail(ui("Constância"), "$constancy (${analysisPercent(analysis.frequencyPercent(taxon), language)} ${tr("das expedições", "of the expeditions", "de las salidas")})")
+                val lowest = taxon.minimumAltitude
+                val highest = taxon.maximumAltitude
+                if (lowest != null && highest != null) {
+                    AnalysisDetail(
+                        ui("Altitude"),
+                        if (Math.round(lowest) == Math.round(highest)) "${Math.round(lowest)} m" else "${Math.round(lowest)}–${Math.round(highest)} m"
+                    )
+                }
+                if (taxon.sexes.isNotEmpty()) AnalysisDetail(ui("Sexo"), taxon.sexes.map { (value, count) -> "${dwcValueText(value)} $count" }.joinToString(" · "))
+                if (taxon.lifeStages.isNotEmpty()) AnalysisDetail(ui("Fase de vida"), taxon.lifeStages.map { (value, count) -> "${dwcValueText(value)} $count" }.joinToString(" · "))
+                AnalysisDetail(
+                    ui("Expedições"),
+                    analysis.expeditions.filterIndexed { index, _ -> taxon.recordsByExpedition[index] > 0 }
+                        .joinToString(", ") { it.session.name.ifBlank { it.session.eventId } }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AnalysisDetail(label: String, value: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(96.dp))
+        Text(value, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+    }
+}
+
+/** Uma expedicao: taxons, individuos e quantos taxons apareceram nela pela primeira vez. */
+@Composable
+private fun AnalysisExpeditionRow(expedition: TaxonAnalysis.Expedition, language: AppLanguage) {
+    val colors = MaterialTheme.colorScheme
+    val richness = expedition.richness
+    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.weight(1f)) {
+            Text(expedition.session.name.ifBlank { expedition.session.eventId }, style = MaterialTheme.typography.bodyLarge)
+            Text(analysisDateOrNone(expedition.session.eventDate, language), style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+        }
+        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                tr(
+                    "$richness ${if (richness == 1) "táxon" else "táxons"} · ${expedition.individuals} ind.",
+                    "$richness ${if (richness == 1) "taxon" else "taxa"} · ${expedition.individuals} ind.",
+                    "$richness ${if (richness == 1) "taxón" else "taxones"} · ${expedition.individuals} ind."
+                ),
+                style = MaterialTheme.typography.bodyMedium
+            )
+            val newTaxa = expedition.newTaxa
+            Surface(shape = RoundedCornerShape(10.dp), color = if (newTaxa > 0) colors.primary else colors.onSurface.copy(alpha = 0.12f)) {
+                Text(
+                    if (newTaxa == 0) ui("nenhum novo") else tr(
+                        "+$newTaxa ${if (newTaxa == 1) "novo" else "novos"}",
+                        "+$newTaxa new",
+                        "+$newTaxa ${if (newTaxa == 1) "nuevo" else "nuevos"}"
+                    ),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (newTaxa > 0) colors.onPrimary else colors.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun analysisConstancyLabel(constancy: TaxonAnalysis.Constancy): String = when (constancy) {
+    TaxonAnalysis.Constancy.CONSTANT -> ui("Constante")
+    TaxonAnalysis.Constancy.ACCESSORY -> ui("Acessória")
+    TaxonAnalysis.Constancy.ACCIDENTAL -> ui("Acidental")
+}
+
+/** Genero e epiteto em italico; autor, "sp." e "cf." sem italico. */
+@Composable
+private fun scientificNameText(name: String): AnnotatedString = buildAnnotatedString {
+    ScientificName.runs(name).forEach { run ->
+        if (run.italic) withStyle(SpanStyle(fontStyle = FontStyle.Italic, fontWeight = FontWeight.Medium)) { append(run.text) } else append(run.text)
+    }
+}
+
+/** "2026-10-13" como se le: 13/10/2026; em ingles fica como esta. Intervalo usa a primeira data. */
+private fun analysisDate(date: String, language: AppLanguage): String {
+    val parsed = runCatching { LocalDate.parse(date.take(10)) }.getOrNull() ?: return date
+    return if (language == AppLanguage.EN) parsed.toString() else parsed.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))
+}
+
+@Composable
+private fun analysisDateOrNone(date: String, language: AppLanguage): String =
+    if (date.isBlank()) ui("Sem data") else analysisDate(date, language)
+
+/** Rotulo do ponto no grafico, em duas linhas; sem data, o numero da expedicao. */
+private fun analysisChartLabel(date: String, index: Int, language: AppLanguage): String {
+    val parsed = runCatching { LocalDate.parse(date.take(10)) }.getOrNull() ?: return "${index + 1}"
+    val dayMonth = if (language == AppLanguage.EN) DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH) else DateTimeFormatter.ofPattern("dd/MM")
+    return "${parsed.format(dayMonth)}\n${parsed.year}"
+}
+
+private fun analysisMonthNames(language: AppLanguage, short: Boolean): List<String> = when (language) {
+    AppLanguage.PT -> if (short) listOf("jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez")
+    else listOf("Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro")
+    AppLanguage.EN -> if (short) listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+    else listOf("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+    AppLanguage.ES -> if (short) listOf("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
+    else listOf("Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre")
+}
+
+/** 0,53 (0.53 em ingles), com [decimals] casas. */
+private fun analysisNumber(value: Double, decimals: Int, language: AppLanguage): String {
+    val text = String.format(Locale.US, "%.${decimals}f", value)
+    return if (language == AppLanguage.EN) text else text.replace('.', ',')
+}
+
+/** 50% ou 16,7% (16.7% em ingles). */
+private fun analysisPercent(value: Double, language: AppLanguage): String {
+    val rounded = Math.round(value * 10) / 10.0
+    val text = if (rounded % 1.0 == 0.0) rounded.toLong().toString() else String.format(Locale.US, "%.1f", rounded)
+    return (if (language == AppLanguage.EN) text else text.replace('.', ',')) + "%"
 }
 
 @Composable

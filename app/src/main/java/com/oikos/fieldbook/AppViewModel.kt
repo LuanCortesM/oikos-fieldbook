@@ -197,6 +197,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun observeSessions(projectId: Long) = repository.observeSessions(projectId)
     fun observeSession(sessionId: Long) = repository.observeSession(sessionId)
     fun observeOccurrences(sessionId: Long) = repository.observeOccurrences(sessionId)
+    fun observeProjectOccurrences(projectId: Long) = repository.observeProjectOccurrences(projectId)
     fun observeOccurrence(occurrenceId: Long) = repository.observeOccurrence(occurrenceId)
     fun observeSessionMedia(sessionId: Long) = repository.observeSessionMedia(sessionId)
     fun observeOccurrenceMedia(occurrenceId: Long) = repository.observeOccurrenceMedia(occurrenceId)

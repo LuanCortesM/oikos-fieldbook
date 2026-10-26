@@ -77,6 +77,9 @@ interface OccurrenceDao {
     fun observeForSession(sessionId: Long): Flow<List<OccurrenceEntity>>
 
     @Query("SELECT * FROM occurrences WHERE projectId = :projectId ORDER BY createdAt DESC")
+    fun observeForProject(projectId: Long): Flow<List<OccurrenceEntity>>
+
+    @Query("SELECT * FROM occurrences WHERE projectId = :projectId ORDER BY createdAt DESC")
     suspend fun getForProject(projectId: Long): List<OccurrenceEntity>
 
     @Query("SELECT * FROM occurrences WHERE sessionId = :sessionId ORDER BY createdAt DESC")
